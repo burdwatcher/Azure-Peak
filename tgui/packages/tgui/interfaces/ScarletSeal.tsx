@@ -1444,7 +1444,9 @@ const SeatTile = (props: { seat: Seat; dense?: boolean }) => {
 
 export const ScarletSeal = () => {
   const { act, data } = useBackend<Data>();
-  const [showRef, setShowRef] = useState(false);
+  const [refTab, setRefTab] = useState<'rules' | 'classic' | 'expanded' | null>(
+    null,
+  );
   const [selectedSlot, setSelectedSlot] = useState<number>(0);
   const [selectedTargets, setSelectedTargets] = useState<number[]>([]);
   const [selectedPeek, setSelectedPeek] = useState<number>(0);
@@ -2537,23 +2539,23 @@ export const ScarletSeal = () => {
           </div>
 
           {/* Right Side Panel */}
-          <SidePanel openReference={() => setShowRef(true)} />
+          <SidePanel
+            openRules={() => setRefTab('rules')}
+            openCards={() => setRefTab(data.expanded ? 'expanded' : 'classic')}
+          />
         </div>
 
-        {showRef && (
-          <ReferenceModal
-            defaultExpanded={!!data.expanded}
-            onClose={() => setShowRef(false)}
-          />
+        {refTab && (
+          <ReferenceModal initialTab={refTab} onClose={() => setRefTab(null)} />
         )}
       </Window.Content>
     </Window>
   );
 };
 
-const SidePanel = (props: { openReference: () => void }) => {
+const SidePanel = (props: { openRules: () => void; openCards: () => void }) => {
   const { act, data } = useBackend<Data>();
-  const { openReference } = props;
+  const { openRules, openCards } = props;
   const logRef = useRef<HTMLDivElement>(null);
   const history = data.history || [];
 
@@ -2591,21 +2593,11 @@ const SidePanel = (props: { openReference: () => void }) => {
     >
       {/* Header Card */}
       <div style={panelCard}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={capsStyle}>
-              Card Game ·{' '}
-              {data.expanded ? '32 Cards (5–8P)' : '16 Cards (2–4P)'}
-            </div>
-            <div
-              style={{ fontFamily: TITLE_FONT, color: TITLE, fontSize: '18px' }}
-            >
-              Scarlet Seal
-            </div>
-          </div>
-          <Button icon="book-open" onClick={openReference}>
-            Cards
-          </Button>
+        <div style={capsStyle}>
+          Card Game · {data.expanded ? '32 Cards (5–8P)' : '16 Cards (2–4P)'}
+        </div>
+        <div style={{ fontFamily: TITLE_FONT, color: TITLE, fontSize: '18px' }}>
+          Scarlet Seal
         </div>
         <div
           style={{
@@ -2617,6 +2609,14 @@ const SidePanel = (props: { openReference: () => void }) => {
         >
           First to {data.seals_to_win} Seals of Favor wins
           {data.round > 0 ? ` · Round ${data.round}` : ''}.
+        </div>
+        <div style={rowStyle}>
+          <Button icon="scroll" onClick={openRules}>
+            Rules
+          </Button>
+          <Button icon="book-open" onClick={openCards}>
+            Cards
+          </Button>
         </div>
       </div>
 
@@ -2764,14 +2764,26 @@ const SidePanel = (props: { openReference: () => void }) => {
   );
 };
 
+const ruleSectionTitle: CSSProperties = {
+  fontWeight: 'bold',
+  color: TITLE,
+  fontSize: FONT_TITLE,
+  marginTop: '10px',
+  marginBottom: '3px',
+};
+
+const ruleText: CSSProperties = {
+  fontSize: FONT_SMALL,
+  color: INK,
+  lineHeight: 1.45,
+};
+
 const ReferenceModal = (props: {
-  defaultExpanded: boolean;
+  initialTab: 'rules' | 'classic' | 'expanded';
   onClose: () => void;
 }) => {
-  const { defaultExpanded, onClose } = props;
-  const [tab, setTab] = useState<'classic' | 'expanded'>(
-    defaultExpanded ? 'expanded' : 'classic',
-  );
+  const { initialTab, onClose } = props;
+  const [tab, setTab] = useState<'rules' | 'classic' | 'expanded'>(initialTab);
   const order = tab === 'expanded' ? EXPANSION_ORDER : CLASSIC_ORDER;
 
   return (
@@ -2791,7 +2803,7 @@ const ReferenceModal = (props: {
       <div
         style={{
           ...panelCard,
-          width: '580px',
+          width: '600px',
           maxHeight: '90%',
           overflowY: 'auto',
           padding: '14px 18px',
@@ -2814,14 +2826,26 @@ const ReferenceModal = (props: {
               fontSize: '20px',
             }}
           >
-            Court Reference Card
+            {tab === 'rules'
+              ? 'How to Play Scarlet Seal'
+              : 'Court Reference Card'}
           </div>
           <Button icon="times" onClick={onClose}>
             Close
           </Button>
         </div>
 
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '6px',
+            marginBottom: '10px',
+          }}
+        >
+          <Button selected={tab === 'rules'} onClick={() => setTab('rules')}>
+            How to Play
+          </Button>
           <Button
             selected={tab === 'classic'}
             onClick={() => setTab('classic')}
@@ -2836,101 +2860,164 @@ const ReferenceModal = (props: {
           </Button>
         </div>
 
-        <div
-          style={{
-            fontSize: FONT_SMALL,
-            color: INK_SOFT,
-            marginBottom: '8px',
-            lineHeight: 1.4,
-          }}
-        >
-          {tab === 'classic' ? (
-            <>
-              Used alone for 2–4 players (and combined with the expansion for
-              5–8 players). Seals of Favor to win: <b>2P: 7</b> · <b>3P: 5</b> ·{' '}
-              <b>4–8P: 4</b>. Showdown ties break by highest sum of discarded
-              cards.
-            </>
-          ) : (
-            <>
-              Added automatically for 5–8 players (32 cards total). Naming a
-              number (Watchman or Prelate) matches <b>all</b> roles with that
-              number. Multiple players tying at 4+ Seals play a tiebreaker
-              round.
-            </>
-          )}
-        </div>
+        {tab === 'rules' ? (
+          <div
+            style={{
+              borderTop: `1px dashed ${INK_FAINT}`,
+              paddingTop: '4px',
+            }}
+          >
+            <div style={ruleSectionTitle}>Goal</div>
+            <div style={ruleText}>
+              Outlast every rival or hold the highest-ranking courtier when the
+              deck runs dry to claim a <b>Seal of Favor</b>. Collect enough
+              Seals of Favor to win the match: <b>2 Players: 7</b> ·{' '}
+              <b>3 Players: 5</b> · <b>4–8 Players: 4</b>.
+            </div>
 
-        {order.map((id) => {
-          const meta = CARDS[id];
-          const copies =
-            tab === 'expanded'
-              ? id === 'watchman'
-                ? '+3 (8 total)'
-                : `×${meta.copiesExpanded}`
-              : `×${meta.copiesClassic}`;
-          return (
+            <div style={ruleSectionTitle}>Round Setup</div>
+            <div style={ruleText}>
+              With <b>2–4 players</b>, the 16-card classic deck is shuffled;
+              with <b>5–8 players</b>, all 32 cards are used automatically. One
+              card is set aside face-down (drawn only if the deck is empty when
+              a redraw occurs). In a <b>2-player</b> game, 3 additional cards
+              are placed face-up for both players to examine. Each courtier
+              starts with <b>1 secret card</b> in hand.
+            </div>
+
+            <div style={ruleSectionTitle}>On Your Turn</div>
+            <div style={ruleText}>
+              1. You automatically draw 1 card, giving you <b>2 cards</b> in
+              hand.
+              <br />
+              2. Pick 1 card to discard face-up in front of you and resolve its
+              effect—even if it hurts you.
+              <br />
+              3. <b>Consort (7) Rule:</b> If you hold Consort together with{' '}
+              <b>Hand (6)</b> or <b>Steward (5)</b>, you must discard Consort.
+              <br />
+              4. <b>Protected / Forced Targets:</b> If no legal target is
+              available due to <b>Attendant (4)</b> or <b>Flatterer (4)</b>,
+              your card is discarded without effect (<b>Steward</b> must choose
+              yourself if all rivals are shielded).
+            </div>
+
+            <div style={ruleSectionTitle}>Knocked Out & Round End</div>
+            <div style={ruleText}>
+              When knocked out, you discard your remaining card face-up (no
+              effect) and wait for the next round. A round ends when only{' '}
+              <b>1 courtier remains</b> or when the <b>deck empties</b> at the
+              end of a turn:
+              <br />• <b>Showdown:</b> Remaining players reveal their hands; the
+              highest card wins (<b>+1</b> per <b>Seneschal</b> in your discards
+              in 5–8P; <b>Sovereign</b> beats <b>Prelate</b>).
+              <br />• <b>Ties:</b> Broken by the highest total value of cards in
+              your discard pile. If still tied, all tied players claim a Seal of
+              Favor.
+              <br />• <b>5–8P Extras:</b> Naming a number (<b>Watchman</b> /{' '}
+              <b>Prelate</b>) matches <i>all</i> roles with that number. If
+              multiple players tie at 4+ Seals, play a tiebreaker round.
+            </div>
+          </div>
+        ) : (
+          <>
             <div
-              key={id}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '6px 0',
-                borderTop: `1px dashed ${INK_FAINT}`,
+                fontSize: FONT_SMALL,
+                color: INK_SOFT,
+                marginBottom: '8px',
+                lineHeight: 1.4,
               }}
             >
-              <span
-                style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '50%',
-                  background: meta.accent,
-                  color: '#fdf3dc',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 'bold',
-                  fontFamily: TITLE_FONT,
-                  flexShrink: 0,
-                }}
-              >
-                {meta.value}
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '2px',
-                  borderRadius: '4px',
-                  background: '#f5e8ce',
-                  border: `1px solid ${meta.accent}`,
-                  flexShrink: 0,
-                }}
-              >
-                <CardEmblem id={meta.id} color={meta.accent} size={26} />
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 'bold', color: INK }}>
-                  {meta.name}{' '}
+              {tab === 'classic' ? (
+                <>
+                  Used alone for 2–4 players (and combined with the expansion
+                  for 5–8 players). Seals of Favor to win: <b>2P: 7</b> ·{' '}
+                  <b>3P: 5</b> · <b>4–8P: 4</b>. Showdown ties break by highest
+                  sum of discarded cards.
+                </>
+              ) : (
+                <>
+                  Added automatically for 5–8 players (32 cards total). Naming a
+                  number (Watchman or Prelate) matches <b>all</b> roles with
+                  that number. Multiple players tying at 4+ Seals play a
+                  tiebreaker round.
+                </>
+              )}
+            </div>
+
+            {order.map((id) => {
+              const meta = CARDS[id];
+              const copies =
+                tab === 'expanded'
+                  ? id === 'watchman'
+                    ? '+3 (8 total)'
+                    : `×${meta.copiesExpanded}`
+                  : `×${meta.copiesClassic}`;
+              return (
+                <div
+                  key={id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '6px 0',
+                    borderTop: `1px dashed ${INK_FAINT}`,
+                  }}
+                >
                   <span
                     style={{
-                      fontWeight: 'normal',
-                      fontSize: FONT_SMALL,
-                      color: INK_SOFT,
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '50%',
+                      background: meta.accent,
+                      color: '#fdf3dc',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontFamily: TITLE_FONT,
+                      flexShrink: 0,
                     }}
                   >
-                    ({copies})
+                    {meta.value}
                   </span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '2px',
+                      borderRadius: '4px',
+                      background: '#f5e8ce',
+                      border: `1px solid ${meta.accent}`,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <CardEmblem id={meta.id} color={meta.accent} size={26} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 'bold', color: INK }}>
+                      {meta.name}{' '}
+                      <span
+                        style={{
+                          fontWeight: 'normal',
+                          fontSize: FONT_SMALL,
+                          color: INK_SOFT,
+                        }}
+                      >
+                        ({copies})
+                      </span>
+                    </div>
+                    <div style={{ fontSize: FONT_SMALL, color: INK_SOFT }}>
+                      {meta.summary}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: FONT_SMALL, color: INK_SOFT }}>
-                  {meta.summary}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
