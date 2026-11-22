@@ -44,7 +44,6 @@ type Seat = {
   index: number;
   color: SeatColor;
   name: string | null;
-  mine: BooleanLike;
   away: BooleanLike;
   seals: number;
   hand: string[];
@@ -111,7 +110,6 @@ type CardMeta = {
   name: string;
   copiesClassic: number;
   copiesExpanded: number;
-  expansion?: boolean;
   accent: string;
   summary: string;
   targetMode: TargetMode;
@@ -126,7 +124,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Fool',
     copiesClassic: 0,
     copiesExpanded: 1,
-    expansion: true,
     accent: '#8a5a14',
     summary:
       'Place the Fool token on another player. If they win the round, you gain a Seal of Favor.',
@@ -138,7 +135,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Cutthroat',
     copiesClassic: 0,
     copiesExpanded: 1,
-    expansion: true,
     accent: '#3b242c',
     summary:
       'If targeted by a Watchman while holding this, the Watchman is knocked out instead; discard this and draw.',
@@ -172,7 +168,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Inquisitor',
     copiesClassic: 0,
     copiesExpanded: 2,
-    expansion: true,
     accent: '#5c1f35',
     summary:
       'Choose 2 players (may include yourself) to swap hands, then secretly inspect one of those hands.',
@@ -196,7 +191,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Spymaster',
     copiesClassic: 0,
     copiesExpanded: 2,
-    expansion: true,
     accent: '#2c4d4a',
     summary: 'Secretly inspect the hands of 1 or 2 other players.',
     targetMode: 'one_or_two',
@@ -218,7 +212,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Flatterer',
     copiesClassic: 0,
     copiesExpanded: 2,
-    expansion: true,
     accent: '#7d4d1a',
     summary:
       'Choose any player (including yourself). The next card played that chooses a player must choose them.',
@@ -243,7 +236,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Seneschal',
     copiesClassic: 0,
     copiesExpanded: 2,
-    expansion: true,
     accent: '#534378',
     summary:
       'Adds +1 to your hand value at end-of-round showdown for each Seneschal in your discard pile.',
@@ -265,7 +257,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Warden',
     copiesClassic: 0,
     copiesExpanded: 1,
-    expansion: true,
     accent: '#3d5266',
     summary:
       'If this card is in your discard pile when you are knocked out of the round, gain a Seal of Favor.',
@@ -288,7 +279,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Matriarch',
     copiesClassic: 0,
     copiesExpanded: 1,
-    expansion: true,
     accent: '#6e2348',
     summary:
       'Secretly compare hands with another player. The higher card is knocked out of the round.',
@@ -311,7 +301,6 @@ const CARDS: Record<string, CardMeta> = {
     name: 'Prelate',
     copiesClassic: 0,
     copiesExpanded: 1,
-    expansion: true,
     accent: '#916316',
     summary:
       'Name any number (0–9) and a player. If right, gain a Seal of Favor and they may discard & redraw. Loses to Sovereign at showdown.',
@@ -1075,15 +1064,15 @@ const HandCard = (props: {
   );
 };
 
-const DiscardRow = (props: { discards: string[]; dark?: boolean }) => {
-  const { discards, dark } = props;
+const DiscardRow = (props: { discards: string[] }) => {
+  const { discards } = props;
   if (!discards.length) {
     return (
       <div
         style={{
           fontSize: '10px',
           fontStyle: 'italic',
-          color: dark ? 'rgba(242, 222, 186, 0.55)' : INK_FAINT,
+          color: 'rgba(242, 222, 186, 0.55)',
         }}
       >
         No discards
@@ -1140,25 +1129,6 @@ const SeatTile = (props: { seat: Seat; dense?: boolean }) => {
         Sit
       </MatButton>
     );
-  } else if (seat.mine) {
-    seatAction =
-      data.phase === 'playing' || data.phase === 'round_end' ? (
-        <MatButton
-          confirmLabel="Leave?"
-          title="Stand up and forfeit the current match."
-          style={{ fontSize: '10px', padding: '1px 7px' }}
-          onClick={() => act('stand', { seat: seat.index })}
-        >
-          Leave
-        </MatButton>
-      ) : (
-        <MatButton
-          style={{ fontSize: '10px', padding: '1px 7px' }}
-          onClick={() => act('stand', { seat: seat.index })}
-        >
-          Get up
-        </MatButton>
-      );
   } else if (seat.name && seat.away && (isLobby || !!data.my_seat)) {
     seatAction = (
       <MatButton
@@ -1346,7 +1316,7 @@ const SeatTile = (props: { seat: Seat; dense?: boolean }) => {
                 Turn
               </span>
             )}
-            {!!seat.away && !seat.mine && (
+            {!!seat.away && (
               <span
                 style={{
                   ...badgeStyle(INK_FAINT),
@@ -1432,7 +1402,7 @@ const SeatTile = (props: { seat: Seat; dense?: boolean }) => {
                   Discards
                   {seat.discards.length > 0 && ` (${seat.discard_sum})`}
                 </div>
-                <DiscardRow discards={seat.discards} dark />
+                <DiscardRow discards={seat.discards} />
               </div>
             </div>
           )}
@@ -2529,7 +2499,7 @@ export const ScarletSeal = () => {
                             ` (sum ${mySeat.discard_sum})`}
                           :
                         </span>
-                        <DiscardRow discards={mySeat.discards} dark />
+                        <DiscardRow discards={mySeat.discards} />
                       </div>
                     </>
                   )}

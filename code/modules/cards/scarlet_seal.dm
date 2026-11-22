@@ -160,8 +160,6 @@
 	var/reset_ckey
 	var/reset_name
 	var/reset_timer
-	/// Mat rotation in degrees
-	var/spin = 0
 
 /obj/structure/scarlet_seal/Initialize(mapload)
 	. = ..()
@@ -177,7 +175,6 @@
 /obj/structure/scarlet_seal/get_mechanics_examine(mob/user)
 	. = ..()
 	. += span_info("Use the card mat with an empty hand to sit down or spectate.")
-	. += span_info("Right click the mat to rotate it.")
 	. += span_info("Supports 2 to 8 players: 16-card court deck for 2–4 players, expanding to 32 cards for 5–8 players.")
 	. += span_info("Pack the cards back into their case once no match is in progress.")
 
@@ -189,14 +186,6 @@
 	if(!in_range(src, user))
 		return ..()
 	ui_interact(user)
-	return TRUE
-
-/obj/structure/scarlet_seal/attack_right(mob/user)
-	if(!user.canUseTopic(src, be_close = TRUE))
-		return ..()
-	spin = (spin + 90) % 360
-	transform = turn(matrix(), spin)
-	to_chat(user, span_notice("You rotate the card mat."))
 	return TRUE
 
 /obj/structure/scarlet_seal/update_icon_state()
@@ -221,7 +210,6 @@
 			"index" = S.index,
 			"color" = S.color_key,
 			"name" = S.name,
-			"mine" = is_mine,
 			"away" = !!S.ckey && !(S.ckey in viewers),
 			"seals" = S.seals,
 			"hand" = can_see_hand ? S.hand.Copy() : list(),
