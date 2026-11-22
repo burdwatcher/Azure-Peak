@@ -26,23 +26,37 @@ import {
   TITLE,
   TITLE_FONT,
 } from './common/parchment';
-import { WaxSeal, type WaxSealColor } from './common/WaxSeal';
+import { WaxSeal } from './common/WaxSeal';
 
 type Phase = 'lobby' | 'playing' | 'round_end' | 'match_end';
 
+type SeatColor =
+  | 'red'
+  | 'blue'
+  | 'green'
+  | 'amber'
+  | 'plum'
+  | 'teal'
+  | 'copper'
+  | 'slate';
+
 type Seat = {
   index: number;
-  color: WaxSealColor;
+  color: SeatColor;
   name: string | null;
   mine: BooleanLike;
   away: BooleanLike;
   seals: number;
-  hand: number[];
+  hand: string[];
   hand_count: number;
-  discards: number[];
+  discards: string[];
   discard_sum: number;
+  seneschals: number;
+  has_warden: BooleanLike;
   eliminated: BooleanLike;
   protected: BooleanLike;
+  flatterer_marked: BooleanLike;
+  fool_marked: BooleanLike;
   is_turn: BooleanLike;
   round_winner: BooleanLike;
   match_winner: BooleanLike;
@@ -52,12 +66,12 @@ type PrivateIntel = {
   seq: number;
   label: string | null;
   note: string;
-  card: number;
-  target: string | null;
+  cards: string[];
 };
 
 type Data = {
   phase: Phase;
+  expanded: BooleanLike;
   round: number;
   seals_to_win: number;
   seated_count: number;
@@ -65,10 +79,15 @@ type Data = {
   my_seat: number;
   my_turn: BooleanLike;
   forced_consort: BooleanLike;
+  flatterer_target: number;
+  fool_owner_name: string | null;
+  pending_prelate_seat: number;
+  pending_prelate_name: string | null;
+  is_my_prelate_choice: BooleanLike;
   targets_by_card: Record<string, number[]>;
   deck_count: number;
   has_hidden_card: BooleanLike;
-  set_aside_open: number[];
+  set_aside_open: string[];
   showdown: BooleanLike;
   round_summary: string | null;
   status: string;
@@ -84,100 +103,279 @@ type Data = {
   can_cancel_reset: BooleanLike;
 };
 
+type TargetMode = 'none' | 'single' | 'one_or_two' | 'swap_two_peek_one';
+
 type CardMeta = {
+  id: string;
   value: number;
   name: string;
-  copies: number;
+  copiesClassic: number;
+  copiesExpanded: number;
+  expansion?: boolean;
   accent: string;
   summary: string;
-  needsTarget: boolean;
+  targetMode: TargetMode;
   canTargetSelf?: boolean;
-  needsGuess?: boolean;
+  guessMode?: 'watchman' | 'prelate';
 };
 
-const CARDS: Record<number, CardMeta> = {
-  1: {
+const CARDS: Record<string, CardMeta> = {
+  fool: {
+    id: 'fool',
+    value: 0,
+    name: 'Fool',
+    copiesClassic: 0,
+    copiesExpanded: 1,
+    expansion: true,
+    accent: '#8a5a14',
+    summary:
+      'Place the Fool token on another player. If they win the round, you gain a Seal of Favor.',
+    targetMode: 'single',
+  },
+  cutthroat: {
+    id: 'cutthroat',
+    value: 0,
+    name: 'Cutthroat',
+    copiesClassic: 0,
+    copiesExpanded: 1,
+    expansion: true,
+    accent: '#3b242c',
+    summary:
+      'If targeted by a Watchman while holding this, the Watchman is knocked out instead; discard this and draw.',
+    targetMode: 'none',
+  },
+  watchman: {
+    id: 'watchman',
     value: 1,
     name: 'Watchman',
-    copies: 5,
+    copiesClassic: 5,
+    copiesExpanded: 8,
     accent: '#6b3a2e',
     summary:
-      'Choose another player and name a role other than Watchman. If they hold it, they are knocked out.',
-    needsTarget: true,
-    needsGuess: true,
+      'Choose another player and name a number other than 1. If they hold it, they are knocked out.',
+    targetMode: 'single',
+    guessMode: 'watchman',
   },
-  2: {
+  confessor: {
+    id: 'confessor',
     value: 2,
     name: 'Confessor',
-    copies: 2,
+    copiesClassic: 2,
+    copiesExpanded: 2,
     accent: '#2e4a78',
     summary: 'Choose another player and secretly inspect their hand.',
-    needsTarget: true,
+    targetMode: 'single',
   },
-  3: {
+  inquisitor: {
+    id: 'inquisitor',
+    value: 2,
+    name: 'Inquisitor',
+    copiesClassic: 0,
+    copiesExpanded: 2,
+    expansion: true,
+    accent: '#5c1f35',
+    summary:
+      'Choose 2 players (may include yourself) to swap hands, then secretly inspect one of those hands.',
+    targetMode: 'swap_two_peek_one',
+    canTargetSelf: true,
+  },
+  knight: {
+    id: 'knight',
     value: 3,
     name: 'Knight',
-    copies: 2,
+    copiesClassic: 2,
+    copiesExpanded: 2,
     accent: '#7a5616',
     summary:
       'Secretly compare hands with another player. The lower card is knocked out of the round.',
-    needsTarget: true,
+    targetMode: 'single',
   },
-  4: {
+  spymaster: {
+    id: 'spymaster',
+    value: 3,
+    name: 'Spymaster',
+    copiesClassic: 0,
+    copiesExpanded: 2,
+    expansion: true,
+    accent: '#2c4d4a',
+    summary: 'Secretly inspect the hands of 1 or 2 other players.',
+    targetMode: 'one_or_two',
+  },
+  attendant: {
+    id: 'attendant',
     value: 4,
     name: 'Attendant',
-    copies: 2,
+    copiesClassic: 2,
+    copiesExpanded: 2,
     accent: '#2f5a2c',
     summary:
       'Until the start of your next turn, you are shielded from the effects of other players’ cards.',
-    needsTarget: false,
+    targetMode: 'none',
   },
-  5: {
+  flatterer: {
+    id: 'flatterer',
+    value: 4,
+    name: 'Flatterer',
+    copiesClassic: 0,
+    copiesExpanded: 2,
+    expansion: true,
+    accent: '#7d4d1a',
+    summary:
+      'Choose any player (including yourself). The next card played that chooses a player must choose them.',
+    targetMode: 'single',
+    canTargetSelf: true,
+  },
+  steward: {
+    id: 'steward',
     value: 5,
     name: 'Steward',
-    copies: 2,
+    copiesClassic: 2,
+    copiesExpanded: 2,
     accent: '#3b4f7a',
     summary:
       'Choose any player (including yourself) to discard their hand and draw a new card.',
-    needsTarget: true,
+    targetMode: 'single',
     canTargetSelf: true,
   },
-  6: {
+  seneschal: {
+    id: 'seneschal',
+    value: 5,
+    name: 'Seneschal',
+    copiesClassic: 0,
+    copiesExpanded: 2,
+    expansion: true,
+    accent: '#534378',
+    summary:
+      'Adds +1 to your hand value at end-of-round showdown for each Seneschal in your discard pile.',
+    targetMode: 'none',
+  },
+  hand: {
+    id: 'hand',
     value: 6,
     name: 'Hand',
-    copies: 1,
+    copiesClassic: 1,
+    copiesExpanded: 1,
     accent: '#8b2620',
     summary: 'Trade the card in your hand with another player’s hand.',
-    needsTarget: true,
+    targetMode: 'single',
   },
-  7: {
+  warden: {
+    id: 'warden',
+    value: 6,
+    name: 'Warden',
+    copiesClassic: 0,
+    copiesExpanded: 1,
+    expansion: true,
+    accent: '#3d5266',
+    summary:
+      'If this card is in your discard pile when you are knocked out of the round, gain a Seal of Favor.',
+    targetMode: 'none',
+  },
+  consort: {
+    id: 'consort',
     value: 7,
     name: 'Consort',
-    copies: 1,
+    copiesClassic: 1,
+    copiesExpanded: 1,
     accent: '#5f2d5e',
     summary:
       'If you hold this card with the Hand or Steward, you must discard the Consort.',
-    needsTarget: false,
+    targetMode: 'none',
   },
-  8: {
+  matriarch: {
+    id: 'matriarch',
+    value: 7,
+    name: 'Matriarch',
+    copiesClassic: 0,
+    copiesExpanded: 1,
+    expansion: true,
+    accent: '#6e2348',
+    summary:
+      'Secretly compare hands with another player. The higher card is knocked out of the round.',
+    targetMode: 'single',
+  },
+  sovereign: {
+    id: 'sovereign',
     value: 8,
     name: 'Sovereign',
-    copies: 1,
+    copiesClassic: 1,
+    copiesExpanded: 1,
     accent: '#a41e34',
     summary:
-      'If you discard this card for any reason, you are immediately knocked out of the round.',
-    needsTarget: false,
+      'If you discard this card for any reason, you are immediately knocked out. Beats Prelate at showdown.',
+    targetMode: 'none',
+  },
+  prelate: {
+    id: 'prelate',
+    value: 9,
+    name: 'Prelate',
+    copiesClassic: 0,
+    copiesExpanded: 1,
+    expansion: true,
+    accent: '#916316',
+    summary:
+      'Name any number (0–9) and a player. If right, gain a Seal of Favor and they may discard & redraw. Loses to Sovereign at showdown.',
+    targetMode: 'single',
+    guessMode: 'prelate',
   },
 };
 
-const WATCHMAN_GUESSES = [2, 3, 4, 5, 6, 7, 8];
-const REFERENCE_ORDER = [8, 7, 6, 5, 4, 3, 2, 1];
+const CLASSIC_ORDER = [
+  'sovereign',
+  'consort',
+  'hand',
+  'steward',
+  'attendant',
+  'knight',
+  'confessor',
+  'watchman',
+];
 
-const SEAT_SWATCH: Record<WaxSealColor, string> = {
+const EXPANSION_ORDER = [
+  'prelate',
+  'matriarch',
+  'warden',
+  'seneschal',
+  'flatterer',
+  'spymaster',
+  'inquisitor',
+  'watchman',
+  'fool',
+  'cutthroat',
+];
+
+const NUMBER_LABELS_CLASSIC: Record<number, string> = {
+  2: '2 Confessor',
+  3: '3 Knight',
+  4: '4 Attendant',
+  5: '5 Steward',
+  6: '6 Hand',
+  7: '7 Consort',
+  8: '8 Sovereign',
+};
+
+const NUMBER_LABELS_EXPANDED: Record<number, string> = {
+  0: '0 Fool / Cutthroat',
+  1: '1 Watchman',
+  2: '2 Confessor / Inquisitor',
+  3: '3 Knight / Spymaster',
+  4: '4 Attendant / Flatterer',
+  5: '5 Steward / Seneschal',
+  6: '6 Hand / Warden',
+  7: '7 Consort / Matriarch',
+  8: '8 Sovereign',
+  9: '9 Prelate',
+};
+
+const SEAT_SWATCH: Record<SeatColor, string> = {
   red: '#9d2520',
   blue: '#294878',
   green: '#2f5f32',
   amber: '#9c6e1c',
+  plum: '#6e2d6b',
+  teal: '#246662',
+  copper: '#9e4d23',
+  slate: '#4f5d6b',
 };
 
 const capsStyle: CSSProperties = {
@@ -307,8 +505,8 @@ const matFrameStyle: CSSProperties = {
   flex: 1,
   display: 'flex',
   flexDirection: 'column',
-  gap: '10px',
-  padding: '12px',
+  gap: '9px',
+  padding: '10px',
   background:
     'radial-gradient(ellipse at center, #6c2026 0%, #51151b 68%, #3c0e13 100%)',
   border: '5px solid #4a2e18',
@@ -317,8 +515,8 @@ const matFrameStyle: CSSProperties = {
     '0 4px 12px rgba(32, 14, 6, 0.5), inset 0 0 0 1px rgba(218, 178, 96, 0.45)',
 };
 
-const CardEmblem = (props: { value: number; color: string; size?: number }) => {
-  const { value, color, size = 40 } = props;
+const CardEmblem = (props: { id: string; color: string; size?: number }) => {
+  const { id, color, size = 40 } = props;
   return (
     <svg
       aria-hidden="true"
@@ -327,8 +525,38 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
       width={size}
       style={{ display: 'block', flexShrink: 0 }}
     >
-      {/* 1: Watchman — Heater shield & crossbar */}
-      {value === 1 && (
+      {id === 'fool' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path
+            d="M12 31 C11 21 15 14 21 18 L24 12 L27 18 C33 14 37 21 36 31 Z"
+            fill={`${color}24`}
+          />
+          <circle cx="11" cy="17" r="2.2" fill={color} />
+          <circle cx="24" cy="10" r="2.2" fill={color} />
+          <circle cx="37" cy="17" r="2.2" fill={color} />
+          <path d="M13 35 H35" />
+        </g>
+      )}
+      {id === 'cutthroat' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path d="M35 10 L17 28 L13 36 L21 32 L39 14 Z" fill={`${color}26`} />
+          <path d="M13 24 L24 35" />
+          <circle cx="15" cy="34" r="1.8" fill={color} />
+        </g>
+      )}
+      {id === 'watchman' && (
         <g
           fill="none"
           stroke={color}
@@ -344,8 +572,7 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <path d="M16 21 H32" />
         </g>
       )}
-      {/* 2: Confessor — Sacred cross & halo */}
-      {value === 2 && (
+      {id === 'confessor' && (
         <g
           fill="none"
           stroke={color}
@@ -359,8 +586,22 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <path d="M18 39 H30" />
         </g>
       )}
-      {/* 3: Knight — Crossed longswords */}
-      {value === 3 && (
+      {id === 'inquisitor' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path d="M24 8 V38" />
+          <path d="M12 18 H36" />
+          <path d="M12 18 L9 27 H15 Z" fill={`${color}26`} />
+          <path d="M36 18 L33 27 H39 Z" fill={`${color}26`} />
+          <path d="M17 38 H31" />
+        </g>
+      )}
+      {id === 'knight' && (
         <g
           fill="none"
           stroke={color}
@@ -375,8 +616,23 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <circle cx="24" cy="24" r="4" fill={`${color}30`} />
         </g>
       )}
-      {/* 4: Attendant — Shielded lantern */}
-      {value === 4 && (
+      {id === 'spymaster' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path
+            d="M8 24 C13 15 19 13 24 13 C29 13 35 15 40 24 C35 33 29 35 24 35 C19 35 13 33 8 24 Z"
+            fill={`${color}20`}
+          />
+          <circle cx="24" cy="24" r="5.5" fill={`${color}30`} />
+          <circle cx="24" cy="24" r="2.2" fill={color} />
+        </g>
+      )}
+      {id === 'attendant' && (
         <g
           fill="none"
           stroke={color}
@@ -393,8 +649,23 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <circle cx="24" cy="10" r="2" fill={color} />
         </g>
       )}
-      {/* 5: Steward — Keep key & signet */}
-      {value === 5 && (
+      {id === 'flatterer' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path
+            d="M13 14 H35 V28 C35 34 29 38 24 38 C19 38 13 34 13 28 Z"
+            fill={`${color}20`}
+          />
+          <path d="M18 21 H22 M26 21 H30" />
+          <path d="M18 29 C21 32 27 32 30 29" />
+        </g>
+      )}
+      {id === 'steward' && (
         <g
           fill="none"
           stroke={color}
@@ -409,8 +680,20 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <path d="M35 36 L39 32" />
         </g>
       )}
-      {/* 6: Hand — Heraldic open hand & signet ring */}
-      {value === 6 && (
+      {id === 'seneschal' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path d="M14 11 H34 V37 H14 Z" fill={`${color}20`} />
+          <path d="M19 18 H29 M19 24 H29 M19 30 H25" />
+          <circle cx="32" cy="32" r="4.5" fill={color} />
+        </g>
+      )}
+      {id === 'hand' && (
         <g
           fill="none"
           stroke={color}
@@ -425,8 +708,20 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <circle cx="22.5" cy="29" r="3" fill={color} />
         </g>
       )}
-      {/* 7: Consort — Crescent moon & star */}
-      {value === 7 && (
+      {id === 'warden' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path d="M12 12 H36 V36 H12 Z" fill={`${color}20`} />
+          <path d="M18 12 V36 M24 12 V36 M30 12 V36" />
+          <path d="M12 20 H36 M12 28 H36" />
+        </g>
+      )}
+      {id === 'consort' && (
         <g
           fill="none"
           stroke={color}
@@ -441,8 +736,21 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <path d="M32 16 L34 20 L38 20 L35 23 L36 27 L32 25 L28 27 L29 23 L26 20 L30 20 Z" />
         </g>
       )}
-      {/* 8: Sovereign — Royal crown */}
-      {value === 8 && (
+      {id === 'matriarch' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path d="M12 29 L16 17 L24 23 L32 17 L36 29 Z" fill={`${color}26`} />
+          <path d="M13 34 H35" />
+          <path d="M24 11 V18" />
+          <circle cx="24" cy="11" r="2.2" fill={color} />
+        </g>
+      )}
+      {id === 'sovereign' && (
         <g
           fill="none"
           stroke={color}
@@ -467,12 +775,28 @@ const CardEmblem = (props: { value: number; color: string; size?: number }) => {
           <circle cx="36" cy="13" r="2" fill={color} />
         </g>
       )}
+      {id === 'prelate' && (
+        <g
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.3"
+        >
+          <path
+            d="M24 8 C31 13 34 20 33 29 H15 C14 20 17 13 24 8 Z"
+            fill={`${color}26`}
+          />
+          <path d="M14 33 H34 V37 H14 Z" fill={`${color}30`} />
+          <path d="M24 15 V25 M20 20 H28" />
+        </g>
+      )}
     </svg>
   );
 };
 
 const FavorSeal = (props: { filled: boolean; size?: number }) => {
-  const { filled, size = 15 } = props;
+  const { filled, size = 14 } = props;
   return (
     <svg
       aria-hidden="true"
@@ -526,15 +850,15 @@ const CardBack = (props: {
     >
       <div
         style={{
-          width: `${Math.max(16, Math.round(width * 0.46))}px`,
-          height: `${Math.max(16, Math.round(width * 0.46))}px`,
+          width: `${Math.max(15, Math.round(width * 0.46))}px`,
+          height: `${Math.max(15, Math.round(width * 0.46))}px`,
           borderRadius: '50%',
           background: '#a62624',
           border: '1px solid #f0c975',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontSize: `${Math.max(10, Math.round(width * 0.24))}px`,
+          fontSize: `${Math.max(9, Math.round(width * 0.24))}px`,
           fontWeight: 'bold',
         }}
       >
@@ -544,9 +868,9 @@ const CardBack = (props: {
   );
 };
 
-const MiniCardFace = (props: { value: number; highlight?: boolean }) => {
-  const { value, highlight } = props;
-  const meta = CARDS[value];
+const MiniCardFace = (props: { id: string; highlight?: boolean }) => {
+  const { id, highlight } = props;
+  const meta = CARDS[id];
   if (!meta) {
     return null;
   }
@@ -587,7 +911,7 @@ const MiniCardFace = (props: { value: number; highlight?: boolean }) => {
       >
         <span>{meta.value}</span>
       </div>
-      <CardEmblem value={meta.value} color={meta.accent} size={28} />
+      <CardEmblem id={meta.id} color={meta.accent} size={28} />
       <div
         style={{
           fontSize: '9px',
@@ -608,7 +932,8 @@ const MiniCardFace = (props: { value: number; highlight?: boolean }) => {
 };
 
 const HandCard = (props: {
-  value: number;
+  id: string;
+  expanded: boolean;
   tag?: string;
   selected: boolean;
   disabled: boolean;
@@ -617,7 +942,8 @@ const HandCard = (props: {
   onClick?: () => void;
 }) => {
   const {
-    value,
+    id,
+    expanded,
     tag,
     selected,
     disabled,
@@ -625,10 +951,11 @@ const HandCard = (props: {
     interactive,
     onClick,
   } = props;
-  const meta = CARDS[value];
+  const meta = CARDS[id];
   if (!meta) {
     return null;
   }
+  const copies = expanded ? meta.copiesExpanded : meta.copiesClassic;
 
   return (
     <div
@@ -636,8 +963,8 @@ const HandCard = (props: {
       title={disabledReason || meta.summary}
       style={{
         position: 'relative',
-        width: '154px',
-        minHeight: '188px',
+        width: '164px',
+        minHeight: '192px',
         borderRadius: '6px',
         background: disabled
           ? 'linear-gradient(180deg, #dfd2bc 0%, #cfc0a5 100%)'
@@ -698,9 +1025,7 @@ const HandCard = (props: {
         >
           {meta.name}
         </span>
-        <span style={{ fontSize: FONT_TINY, color: '#6b5128' }}>
-          ×{meta.copies}
-        </span>
+        <span style={{ fontSize: FONT_TINY, color: '#6b5128' }}>×{copies}</span>
       </div>
 
       <div
@@ -711,13 +1036,13 @@ const HandCard = (props: {
           padding: '4px 0 6px 0',
         }}
       >
-        <CardEmblem value={meta.value} color={meta.accent} size={46} />
+        <CardEmblem id={meta.id} color={meta.accent} size={46} />
       </div>
 
       <div
         style={{
           fontSize: '11px',
-          lineHeight: 1.32,
+          lineHeight: 1.3,
           color: '#3a2618',
           textAlign: 'center',
           flex: 1,
@@ -750,13 +1075,13 @@ const HandCard = (props: {
   );
 };
 
-const DiscardRow = (props: { discards: number[]; dark?: boolean }) => {
+const DiscardRow = (props: { discards: string[]; dark?: boolean }) => {
   const { discards, dark } = props;
   if (!discards.length) {
     return (
       <div
         style={{
-          fontSize: FONT_TINY,
+          fontSize: '10px',
           fontStyle: 'italic',
           color: dark ? 'rgba(242, 222, 186, 0.55)' : INK_FAINT,
         }}
@@ -767,8 +1092,8 @@ const DiscardRow = (props: { discards: number[]; dark?: boolean }) => {
   }
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
-      {discards.map((val, i) => {
-        const meta = CARDS[val];
+      {discards.map((id, i) => {
+        const meta = CARDS[id];
         return (
           <span
             key={i}
@@ -777,17 +1102,19 @@ const DiscardRow = (props: { discards: number[]; dark?: boolean }) => {
               display: 'inline-flex',
               alignItems: 'center',
               gap: '2px',
-              padding: '1px 5px',
+              padding: '1px 4px',
               borderRadius: '2px',
               background: '#f5e8ce',
               border: `1px solid ${meta?.accent || INK_FAINT}`,
               color: '#2a1a0e',
               fontSize: '10px',
               fontWeight: 'bold',
-              lineHeight: 1.2,
+              lineHeight: 1.15,
             }}
           >
-            <span style={{ color: meta?.accent || '#2a1a0e' }}>{val}</span>
+            <span style={{ color: meta?.accent || '#2a1a0e' }}>
+              {meta?.value ?? '?'}
+            </span>
             <span>{meta?.name || '?'}</span>
           </span>
         );
@@ -796,9 +1123,9 @@ const DiscardRow = (props: { discards: number[]; dark?: boolean }) => {
   );
 };
 
-const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
+const SeatTile = (props: { seat: Seat; dense?: boolean }) => {
   const { act, data } = useBackend<Data>();
-  const { seat, compact } = props;
+  const { seat, dense } = props;
   const active = !!seat.is_turn;
   const isLobby = data.phase === 'lobby' || data.phase === 'match_end';
   const showHandFace = seat.hand.length > 0;
@@ -808,7 +1135,7 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
     seatAction = (
       <MatButton
         onClick={() => act('sit', { seat: seat.index })}
-        style={{ fontSize: '11px', padding: '2px 8px' }}
+        style={{ fontSize: '10px', padding: '1px 7px' }}
       >
         Sit
       </MatButton>
@@ -819,14 +1146,14 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
         <MatButton
           confirmLabel="Leave?"
           title="Stand up and forfeit the current match."
-          style={{ fontSize: '11px', padding: '2px 8px' }}
+          style={{ fontSize: '10px', padding: '1px 7px' }}
           onClick={() => act('stand', { seat: seat.index })}
         >
           Leave
         </MatButton>
       ) : (
         <MatButton
-          style={{ fontSize: '11px', padding: '2px 8px' }}
+          style={{ fontSize: '10px', padding: '1px 7px' }}
           onClick={() => act('stand', { seat: seat.index })}
         >
           Get up
@@ -836,7 +1163,7 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
     seatAction = (
       <MatButton
         title="They have walked away from the table."
-        style={{ fontSize: '11px', padding: '2px 8px' }}
+        style={{ fontSize: '10px', padding: '1px 7px' }}
         onClick={() => act('stand', { seat: seat.index })}
       >
         Clear
@@ -847,9 +1174,8 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
   return (
     <div
       style={{
-        flex: 1,
-        minWidth: compact ? '155px' : '180px',
-        padding: '7px 9px',
+        minWidth: 0,
+        padding: dense ? '5px 7px' : '7px 9px',
         borderRadius: '4px',
         background: active
           ? 'rgba(222, 174, 74, 0.24)'
@@ -859,23 +1185,25 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
         border: `1px solid ${
           seat.match_winner || seat.round_winner
             ? '#f0c45d'
-            : active
-              ? '#e5b54f'
-              : 'rgba(218, 184, 126, 0.32)'
+            : seat.flatterer_marked
+              ? '#f2a640'
+              : active
+                ? '#e5b54f'
+                : 'rgba(218, 184, 126, 0.32)'
         }`,
         borderLeft: `4px solid ${SEAT_SWATCH[seat.color]}`,
         color: '#f6ebd4',
         opacity: seat.eliminated ? 0.72 : 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: '5px',
+        gap: dense ? '4px' : '5px',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
         <span
           style={{
-            width: '10px',
-            height: '10px',
+            width: '9px',
+            height: '9px',
             borderRadius: '50%',
             background: SEAT_SWATCH[seat.color],
             border: '1px solid #f0d7a0',
@@ -892,10 +1220,10 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            fontSize: '12px',
+            fontSize: dense ? '11px' : '12px',
           }}
         >
-          {seat.name || `Seat ${seat.index} (Empty)`}
+          {seat.name || `Seat ${seat.index}`}
         </div>
         {seatAction}
       </div>
@@ -907,7 +1235,7 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               display: 'flex',
               alignItems: 'center',
               flexWrap: 'wrap',
-              gap: '4px',
+              gap: '3px',
             }}
           >
             <span
@@ -915,32 +1243,92 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '2px',
+                gap: '1px',
               }}
             >
               {Array.from({ length: data.seals_to_win }, (_, i) => (
-                <FavorSeal key={i} filled={i < seat.seals} size={14} />
+                <FavorSeal
+                  key={i}
+                  filled={i < seat.seals}
+                  size={dense ? 12 : 14}
+                />
               ))}
             </span>
             {!!seat.protected && (
               <span
                 style={{
                   ...badgeStyle(SEAL_GREEN),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
                 Protected
+              </span>
+            )}
+            {!!seat.flatterer_marked && (
+              <span
+                title="Flatterer mark: the next targeting card must choose this courtier."
+                style={{
+                  ...badgeStyle('#b56614'),
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
+                }}
+              >
+                Must Target
+              </span>
+            )}
+            {!!seat.fool_marked && (
+              <span
+                title={
+                  data.fool_owner_name
+                    ? `Fool token placed by ${data.fool_owner_name}`
+                    : 'Fool token'
+                }
+                style={{
+                  ...badgeStyle('#7a4b94'),
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
+                }}
+              >
+                Fool
+              </span>
+            )}
+            {seat.seneschals > 0 && (
+              <span
+                title={`+${seat.seneschals} to hand value at showdown (Seneschal)`}
+                style={{
+                  ...badgeStyle('#534378'),
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
+                }}
+              >
+                +{seat.seneschals}
+              </span>
+            )}
+            {!!seat.has_warden && !seat.eliminated && (
+              <span
+                title="Has Warden in discards — gains a Seal of Favor if knocked out."
+                style={{
+                  ...badgeStyle('#3d5266'),
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
+                }}
+              >
+                Warden
               </span>
             )}
             {!!seat.eliminated && (
               <span
                 style={{
                   ...badgeStyle(SEAL_RED),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
                 Out
@@ -950,9 +1338,9 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               <span
                 style={{
                   ...badgeStyle(SEAL_AMBER),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
                 Turn
@@ -962,9 +1350,9 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               <span
                 style={{
                   ...badgeStyle(INK_FAINT),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
                 Away
@@ -974,21 +1362,21 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               <span
                 style={{
                   ...badgeStyle(SEAL_AMBER),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
-                Round Winner
+                Winner
               </span>
             )}
             {!!seat.match_winner && data.phase === 'match_end' && (
               <span
                 style={{
                   ...badgeStyle(SEAL_AMBER),
-                  fontSize: '10px',
-                  padding: '0 5px',
-                  marginLeft: '2px',
+                  fontSize: '9px',
+                  padding: '0 4px',
+                  marginLeft: '1px',
                 }}
               >
                 Champion
@@ -997,25 +1385,29 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
           </div>
 
           {data.phase !== 'lobby' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
                 {showHandFace ? (
-                  seat.hand.map((val, i) => (
+                  seat.hand.map((id, i) => (
                     <MiniCardFace
                       key={i}
-                      value={val}
+                      id={id}
                       highlight={!!seat.round_winner && !!data.showdown}
                     />
                   ))
                 ) : seat.hand_count > 0 ? (
                   Array.from({ length: seat.hand_count }, (_, i) => (
-                    <CardBack key={i} width={38} height={54} />
+                    <CardBack
+                      key={i}
+                      width={dense ? 30 : 36}
+                      height={dense ? 42 : 50}
+                    />
                   ))
                 ) : (
                   <div
                     style={{
-                      width: '38px',
-                      height: '54px',
+                      width: dense ? '30px' : '36px',
+                      height: dense ? '42px' : '50px',
                       borderRadius: '4px',
                       border: '1px dashed rgba(218, 184, 126, 0.25)',
                       display: 'flex',
@@ -1032,13 +1424,13 @@ const SeatTile = (props: { seat: Seat; compact?: boolean }) => {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: '10px',
+                    fontSize: '9px',
                     color: 'rgba(242, 222, 186, 0.68)',
                     marginBottom: '2px',
                   }}
                 >
                   Discards
-                  {seat.discards.length > 0 && ` (sum ${seat.discard_sum})`}
+                  {seat.discards.length > 0 && ` (${seat.discard_sum})`}
                 </div>
                 <DiscardRow discards={seat.discards} dark />
               </div>
@@ -1054,8 +1446,9 @@ export const ScarletSeal = () => {
   const { act, data } = useBackend<Data>();
   const [showRef, setShowRef] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number>(0);
-  const [selectedTarget, setSelectedTarget] = useState<number>(0);
-  const [selectedGuess, setSelectedGuess] = useState<number>(0);
+  const [selectedTargets, setSelectedTargets] = useState<number[]>([]);
+  const [selectedPeek, setSelectedPeek] = useState<number>(0);
+  const [selectedGuess, setSelectedGuess] = useState<number>(-1);
   const [dismissedSeq, setDismissedSeq] = useState<number>(0);
 
   const mySeat = data.my_seat
@@ -1066,8 +1459,9 @@ export const ScarletSeal = () => {
   // Reset pending play selection whenever turn, round, or hand changes
   useEffect(() => {
     setSelectedSlot(0);
-    setSelectedTarget(0);
-    setSelectedGuess(0);
+    setSelectedTargets([]);
+    setSelectedPeek(0);
+    setSelectedGuess(-1);
   }, [data.phase, data.round, data.my_turn, handKey]);
 
   // Auto-select Consort if forced
@@ -1076,45 +1470,144 @@ export const ScarletSeal = () => {
       return;
     }
     if (data.forced_consort && selectedSlot === 0) {
-      const idx = mySeat.hand.indexOf(7);
+      const idx = mySeat.hand.indexOf('consort');
       if (idx !== -1) {
         setSelectedSlot(idx + 1);
       }
     }
   }, [data.my_turn, data.forced_consort, handKey, selectedSlot]);
 
-  const selectedCardVal =
-    mySeat && selectedSlot > 0 ? mySeat.hand[selectedSlot - 1] || 0 : 0;
-  const selectedMeta = selectedCardVal ? CARDS[selectedCardVal] : null;
-  const validTargets = selectedCardVal
-    ? data.targets_by_card[String(selectedCardVal)] || []
+  const selectedCardId =
+    mySeat && selectedSlot > 0 ? mySeat.hand[selectedSlot - 1] || '' : '';
+  const selectedMeta = selectedCardId ? CARDS[selectedCardId] : null;
+  const validTargets = selectedCardId
+    ? data.targets_by_card[selectedCardId] || []
     : [];
 
+  const forcedFlatterer =
+    data.flatterer_target > 0 && validTargets.includes(data.flatterer_target)
+      ? data.flatterer_target
+      : 0;
+
   useEffect(() => {
-    if (!selectedMeta?.needsTarget) {
-      setSelectedTarget(0);
-      setSelectedGuess(0);
+    if (!selectedMeta || selectedMeta.targetMode === 'none') {
+      setSelectedTargets([]);
+      setSelectedPeek(0);
+      setSelectedGuess(-1);
       return;
     }
-    if (validTargets.length === 1) {
-      setSelectedTarget(validTargets[0]);
-    } else if (!validTargets.includes(selectedTarget)) {
-      setSelectedTarget(0);
+    if (selectedMeta.targetMode === 'single') {
+      if (validTargets.length === 1) {
+        setSelectedTargets([validTargets[0]]);
+      } else {
+        setSelectedTargets((prev) =>
+          prev.length === 1 && validTargets.includes(prev[0]) ? prev : [],
+        );
+      }
+    } else {
+      // Multi-target (one_or_two or swap_two_peek_one): keep valid + enforce Flatterer
+      setSelectedTargets((prev) => {
+        const next = prev.filter((id) => validTargets.includes(id));
+        if (forcedFlatterer && !next.includes(forcedFlatterer)) {
+          next.unshift(forcedFlatterer);
+        }
+        return next.slice(0, 2);
+      });
     }
-    if (!selectedMeta.needsGuess) {
-      setSelectedGuess(0);
+    if (!selectedMeta.guessMode) {
+      setSelectedGuess(-1);
     }
-  }, [selectedSlot, selectedCardVal, validTargets.join(',')]);
+  }, [selectedSlot, selectedCardId, validTargets.join(','), forcedFlatterer]);
+
+  // Auto-default Inquisitor peek target when 2 targets are chosen
+  useEffect(() => {
+    if (
+      selectedMeta?.targetMode !== 'swap_two_peek_one' ||
+      selectedTargets.length !== 2
+    ) {
+      setSelectedPeek(0);
+      return;
+    }
+    if (!selectedTargets.includes(selectedPeek)) {
+      const other = selectedTargets.find((t) => t !== data.my_seat);
+      setSelectedPeek(other ?? selectedTargets[0]);
+    }
+  }, [selectedMeta?.targetMode, selectedTargets.join(','), data.my_seat]);
+
+  const toggleTarget = (seatIdx: number) => {
+    if (!selectedMeta || !validTargets.includes(seatIdx)) {
+      return;
+    }
+    if (selectedMeta.targetMode === 'single') {
+      setSelectedTargets([seatIdx]);
+      return;
+    }
+    setSelectedTargets((prev) => {
+      if (prev.includes(seatIdx)) {
+        if (seatIdx === forcedFlatterer) {
+          return prev;
+        }
+        return prev.filter((id) => id !== seatIdx);
+      }
+      if (prev.length < 2) {
+        return [...prev, seatIdx];
+      }
+      // Replace the non-forced entry
+      if (forcedFlatterer) {
+        return [forcedFlatterer, seatIdx];
+      }
+      return [prev[1], seatIdx];
+    });
+  };
+
+  const guessNumbers = (() => {
+    if (!selectedMeta?.guessMode) {
+      return [];
+    }
+    if (selectedMeta.guessMode === 'prelate') {
+      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    }
+    return data.expanded ? [0, 2, 3, 4, 5, 6, 7, 8, 9] : [2, 3, 4, 5, 6, 7, 8];
+  })();
+
+  const guessLabels = data.expanded
+    ? NUMBER_LABELS_EXPANDED
+    : NUMBER_LABELS_CLASSIC;
+
+  const targetSatisfied = (() => {
+    if (!selectedMeta || selectedMeta.targetMode === 'none') {
+      return true;
+    }
+    if (validTargets.length === 0) {
+      return true;
+    }
+    if (selectedMeta.targetMode === 'single') {
+      return selectedTargets.length === 1;
+    }
+    if (selectedMeta.targetMode === 'one_or_two') {
+      return (
+        selectedTargets.length >= 1 &&
+        selectedTargets.length <= 2 &&
+        (!forcedFlatterer || selectedTargets.includes(forcedFlatterer))
+      );
+    }
+    if (selectedMeta.targetMode === 'swap_two_peek_one') {
+      return (
+        selectedTargets.length === 2 &&
+        selectedTargets.includes(selectedPeek) &&
+        (!forcedFlatterer || selectedTargets.includes(forcedFlatterer))
+      );
+    }
+    return false;
+  })();
+
+  const guessSatisfied =
+    !selectedMeta?.guessMode ||
+    validTargets.length === 0 ||
+    guessNumbers.includes(selectedGuess);
 
   const canCommitPlay =
-    !!data.my_turn &&
-    !!selectedMeta &&
-    (!selectedMeta.needsTarget ||
-      validTargets.length === 0 ||
-      validTargets.includes(selectedTarget)) &&
-    (!selectedMeta.needsGuess ||
-      validTargets.length === 0 ||
-      (selectedGuess >= 2 && selectedGuess <= 8));
+    !!data.my_turn && !!selectedMeta && targetSatisfied && guessSatisfied;
 
   const submitPlay = () => {
     if (!canCommitPlay) {
@@ -1122,12 +1615,15 @@ export const ScarletSeal = () => {
     }
     act('play', {
       slot: selectedSlot,
-      target: selectedTarget || 0,
-      guess: selectedGuess || 0,
+      target: selectedTargets[0] || 0,
+      target2: selectedTargets[1] || 0,
+      peek: selectedPeek || 0,
+      guess: selectedGuess,
     });
     setSelectedSlot(0);
-    setSelectedTarget(0);
-    setSelectedGuess(0);
+    setSelectedTargets([]);
+    setSelectedPeek(0);
+    setSelectedGuess(-1);
   };
 
   const otherSeats = mySeat
@@ -1139,17 +1635,27 @@ export const ScarletSeal = () => {
       ? otherSeats
       : otherSeats.filter((s) => !!s.name);
 
+  const gridCols = mySeat
+    ? Math.min(4, Math.max(1, visibleOtherSeats.length))
+    : visibleOtherSeats.length > 4
+      ? 4
+      : 2;
+  const denseSeats = visibleOtherSeats.length >= 4;
+
   const intel = data.private_intel;
   const showIntel = !!intel && dismissedSeq !== intel.seq;
+  const myPrelateCardId =
+    data.is_my_prelate_choice && mySeat?.hand[0] ? mySeat.hand[0] : '';
+  const myPrelateCard = myPrelateCardId ? CARDS[myPrelateCardId] : null;
 
   return (
-    <Window width={920} height={680} title="Scarlet Seal" theme="parchment">
+    <Window width={1060} height={740} title="Scarlet Seal" theme="parchment">
       <Window.Content scrollable>
         <div
           style={{
             display: 'flex',
-            gap: '14px',
-            padding: '12px 14px',
+            gap: '12px',
+            padding: '10px 12px',
             height: '100%',
             boxSizing: 'border-box',
             fontFamily: SERIF,
@@ -1163,34 +1669,32 @@ export const ScarletSeal = () => {
               minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
+              gap: '8px',
             }}
           >
             <div style={matFrameStyle}>
-              {/* Top Opponents (or all 4 seats for spectators) */}
+              {/* Top Opponents (or all seats for spectators) */}
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: mySeat
-                    ? `repeat(${Math.max(1, visibleOtherSeats.length)}, minmax(0, 1fr))`
-                    : 'repeat(2, minmax(0, 1fr))',
-                  gap: '8px',
+                  gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+                  gap: '6px',
                 }}
               >
                 {visibleOtherSeats.map((seat) => (
-                  <SeatTile key={seat.index} seat={seat} compact={!!mySeat} />
+                  <SeatTile key={seat.index} seat={seat} dense={denseSeats} />
                 ))}
               </div>
 
-              {/* Center Table Area: Deck, Set-Aside Cards, Private Note, Round Banner */}
+              {/* Center Table Area: Deck, Set-Aside, Pending Prelate Choice, Round Banner, Private Intel */}
               <div
                 style={{
                   flex: 1,
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'center',
-                  gap: '10px',
-                  padding: '6px 4px',
+                  gap: '8px',
+                  padding: '4px 2px',
                 }}
               >
                 {data.phase === 'lobby' ? (
@@ -1198,7 +1702,7 @@ export const ScarletSeal = () => {
                     style={{
                       textAlign: 'center',
                       color: '#f5e7cb',
-                      padding: '14px 18px',
+                      padding: '12px 16px',
                       background: 'rgba(28, 10, 12, 0.45)',
                       border: '1px dashed rgba(224, 188, 118, 0.45)',
                       borderRadius: '4px',
@@ -1211,12 +1715,12 @@ export const ScarletSeal = () => {
                         marginBottom: '6px',
                       }}
                     >
-                      <WaxSeal label="Scarlet Seal" royal size={54} />
+                      <WaxSeal label="Scarlet Seal" royal size={50} />
                     </div>
                     <div
                       style={{
                         fontFamily: TITLE_FONT,
-                        fontSize: '22px',
+                        fontSize: '21px',
                         color: '#f7d996',
                       }}
                     >
@@ -1230,9 +1734,9 @@ export const ScarletSeal = () => {
                         marginTop: '4px',
                       }}
                     >
-                      A game of court intrigue for 2 to 4 players. Hold the
-                      highest courtier when the deck runs dry, or outlast every
-                      rival at the table.
+                      Court intrigue for 2–8 players. Uses the classic 16-card
+                      deck for 2–4 courtiers, and expands to all 32 cards for
+                      5–8 courtiers.
                     </div>
                   </div>
                 ) : (
@@ -1242,8 +1746,8 @@ export const ScarletSeal = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexWrap: 'wrap',
-                      gap: '18px',
-                      padding: '8px 12px',
+                      gap: '16px',
+                      padding: '7px 10px',
                       background: 'rgba(24, 8, 10, 0.36)',
                       border: '1px solid rgba(218, 184, 126, 0.25)',
                       borderRadius: '4px',
@@ -1255,35 +1759,33 @@ export const ScarletSeal = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        gap: '4px',
+                        gap: '3px',
                       }}
                     >
-                      <div style={{ position: 'relative' }}>
-                        {data.deck_count > 0 ? (
-                          <CardBack
-                            width={52}
-                            height={72}
-                            label={String(data.deck_count)}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              width: '52px',
-                              height: '72px',
-                              borderRadius: '4px',
-                              border: '1px dashed rgba(218, 184, 126, 0.45)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: 'rgba(242, 222, 186, 0.65)',
-                              fontSize: '11px',
-                              fontWeight: 'bold',
-                            }}
-                          >
-                            Empty
-                          </div>
-                        )}
-                      </div>
+                      {data.deck_count > 0 ? (
+                        <CardBack
+                          width={48}
+                          height={66}
+                          label={String(data.deck_count)}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: '48px',
+                            height: '66px',
+                            borderRadius: '4px',
+                            border: '1px dashed rgba(218, 184, 126, 0.45)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'rgba(242, 222, 186, 0.65)',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          Empty
+                        </div>
+                      )}
                       <div
                         style={{
                           fontSize: '10px',
@@ -1302,17 +1804,17 @@ export const ScarletSeal = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        gap: '4px',
+                        gap: '3px',
                       }}
-                      title="One card is removed face-down each round. Drawn only if a Steward empties the deck."
+                      title="One card is removed face-down each round. Drawn only if the deck is empty when a redraw occurs."
                     >
                       {data.has_hidden_card ? (
-                        <CardBack width={48} height={68} label="?" />
+                        <CardBack width={44} height={62} label="?" />
                       ) : (
                         <div
                           style={{
-                            width: '48px',
-                            height: '68px',
+                            width: '44px',
+                            height: '62px',
                             borderRadius: '4px',
                             border: '1px dashed rgba(218, 184, 126, 0.35)',
                             display: 'flex',
@@ -1344,12 +1846,12 @@ export const ScarletSeal = () => {
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
-                          gap: '4px',
+                          gap: '3px',
                         }}
                       >
                         <div style={{ display: 'flex', gap: '5px' }}>
-                          {data.set_aside_open.map((val, i) => (
-                            <MiniCardFace key={i} value={val} />
+                          {data.set_aside_open.map((id, i) => (
+                            <MiniCardFace key={i} id={id} />
                           ))}
                         </div>
                         <div
@@ -1367,11 +1869,102 @@ export const ScarletSeal = () => {
                   </div>
                 )}
 
+                {/* Pending Prelate Optional Redraw Prompt */}
+                {data.phase === 'playing' && data.pending_prelate_seat > 0 && (
+                  <div
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '4px',
+                      background: MAT_PANEL_BG,
+                      border: '2px solid #e5b54f',
+                      color: MAT_TEXT,
+                      textAlign: 'center',
+                      boxShadow: '0 3px 10px rgba(0, 0, 0, 0.45)',
+                    }}
+                  >
+                    {data.is_my_prelate_choice ? (
+                      <>
+                        <div
+                          style={{
+                            fontFamily: TITLE_FONT,
+                            fontWeight: 'bold',
+                            fontSize: '15px',
+                            color: '#ffd97d',
+                          }}
+                        >
+                          The Prelate Exposed Your Hand!
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '13px',
+                            color: MAT_TEXT,
+                            marginTop: '3px',
+                          }}
+                        >
+                          Your{' '}
+                          <b>
+                            {myPrelateCard
+                              ? `${myPrelateCard.name} (${myPrelateCard.value})`
+                              : 'card'}
+                          </b>{' '}
+                          was correctly named. You may keep it, or discard it
+                          and draw a new card.
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            marginTop: '8px',
+                          }}
+                        >
+                          <MatButton
+                            variant="default"
+                            onClick={() =>
+                              act('prelate_choice', { choice: 'keep' })
+                            }
+                          >
+                            Keep{' '}
+                            {myPrelateCard
+                              ? myPrelateCard.name
+                              : 'Current Card'}
+                          </MatButton>
+                          {myPrelateCardId === 'sovereign' ? (
+                            <MatButton
+                              variant="danger"
+                              confirmLabel="Really discard Sovereign?"
+                              onClick={() =>
+                                act('prelate_choice', { choice: 'redraw' })
+                              }
+                            >
+                              Discard Sovereign (Eliminate Self)
+                            </MatButton>
+                          ) : (
+                            <MatButton
+                              variant="primary"
+                              onClick={() =>
+                                act('prelate_choice', { choice: 'redraw' })
+                              }
+                            >
+                              Discard & Draw New Card
+                            </MatButton>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: '13px', color: MAT_TEXT_SOFT }}>
+                        Waiting for <b>{data.pending_prelate_name}</b> to decide
+                        whether to keep or redraw their exposed card…
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Round / Match Result Banner on Table */}
                 {(data.phase === 'round_end' || data.phase === 'match_end') && (
                   <div
                     style={{
-                      padding: '10px 14px',
+                      padding: '9px 12px',
                       borderRadius: '4px',
                       background: MAT_PANEL_BG,
                       border: '2px solid #e5b54f',
@@ -1404,7 +1997,7 @@ export const ScarletSeal = () => {
                         : data.round_summary}
                     </div>
                     {!!data.can_next_round && (
-                      <div style={{ marginTop: '8px' }}>
+                      <div style={{ marginTop: '7px' }}>
                         <MatButton
                           variant="primary"
                           onClick={() => act('next_round')}
@@ -1414,7 +2007,7 @@ export const ScarletSeal = () => {
                       </div>
                     )}
                     {!!data.can_start && data.phase === 'match_end' && (
-                      <div style={{ marginTop: '8px' }}>
+                      <div style={{ marginTop: '7px' }}>
                         <MatButton
                           variant="primary"
                           onClick={() => act('start')}
@@ -1433,7 +2026,7 @@ export const ScarletSeal = () => {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '10px',
-                      padding: '8px 11px',
+                      padding: '7px 10px',
                       borderRadius: '4px',
                       background: MAT_PANEL_BG,
                       border: '1.5px solid #7aa8e8',
@@ -1441,8 +2034,14 @@ export const ScarletSeal = () => {
                       boxShadow: '0 3px 10px rgba(0, 0, 0, 0.45)',
                     }}
                   >
-                    {intel.card > 0 ? (
-                      <MiniCardFace value={intel.card} />
+                    {intel.cards.length > 0 ? (
+                      <div
+                        style={{ display: 'flex', gap: '4px', flexShrink: 0 }}
+                      >
+                        {intel.cards.map((id, i) => (
+                          <MiniCardFace key={i} id={id} />
+                        ))}
+                      </div>
                     ) : (
                       <WaxSeal color="blue" label="Intel" mark="!" size={38} />
                     )}
@@ -1462,7 +2061,7 @@ export const ScarletSeal = () => {
                         style={{
                           fontSize: '13px',
                           color: MAT_TEXT,
-                          marginTop: '3px',
+                          marginTop: '2px',
                           lineHeight: 1.35,
                         }}
                       >
@@ -1490,7 +2089,7 @@ export const ScarletSeal = () => {
                     }`,
                     borderLeft: `4px solid ${SEAT_SWATCH[mySeat.color]}`,
                     borderRadius: '4px',
-                    padding: '9px 10px',
+                    padding: '8px 10px',
                     color: '#f6ebd4',
                   }}
                 >
@@ -1499,8 +2098,9 @@ export const ScarletSeal = () => {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      marginBottom: '8px',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                      marginBottom: '7px',
                     }}
                   >
                     <span
@@ -1522,7 +2122,7 @@ export const ScarletSeal = () => {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '2px',
-                        marginLeft: '4px',
+                        marginLeft: '2px',
                       }}
                     >
                       {Array.from({ length: data.seals_to_win }, (_, i) => (
@@ -1535,6 +2135,20 @@ export const ScarletSeal = () => {
                     </span>
                     {!!mySeat.protected && (
                       <span style={badgeStyle(SEAL_GREEN)}>Protected</span>
+                    )}
+                    {!!mySeat.flatterer_marked && (
+                      <span style={badgeStyle('#b56614')}>Must Target</span>
+                    )}
+                    {!!mySeat.fool_marked && (
+                      <span style={badgeStyle('#7a4b94')}>Fool Bet</span>
+                    )}
+                    {mySeat.seneschals > 0 && (
+                      <span style={badgeStyle('#534378')}>
+                        +{mySeat.seneschals} Showdown
+                      </span>
+                    )}
+                    {!!mySeat.has_warden && !mySeat.eliminated && (
+                      <span style={badgeStyle('#3d5266')}>Warden Active</span>
                     )}
                     {!!mySeat.eliminated && (
                       <span style={badgeStyle(SEAL_RED)}>Knocked Out</span>
@@ -1574,16 +2188,17 @@ export const ScarletSeal = () => {
                         }}
                       >
                         {mySeat.hand.length > 0 ? (
-                          mySeat.hand.map((val, i) => {
+                          mySeat.hand.map((id, i) => {
                             const slot = i + 1;
                             const blockedByConsort =
                               !!data.my_turn &&
                               !!data.forced_consort &&
-                              val !== 7;
+                              id !== 'consort';
                             return (
                               <HandCard
-                                key={`${slot}-${val}`}
-                                value={val}
+                                key={`${slot}-${id}`}
+                                id={id}
+                                expanded={!!data.expanded}
                                 tag={
                                   data.my_turn && slot === 2
                                     ? 'Drawn'
@@ -1608,7 +2223,7 @@ export const ScarletSeal = () => {
                         ) : (
                           <div
                             style={{
-                              padding: '12px',
+                              padding: '10px',
                               fontStyle: 'italic',
                               color: 'rgba(242, 222, 186, 0.78)',
                               fontSize: FONT_SMALL,
@@ -1625,12 +2240,12 @@ export const ScarletSeal = () => {
                       {!!data.my_turn && (
                         <div
                           style={{
-                            padding: '9px 11px',
+                            padding: '8px 10px',
                             borderRadius: '4px',
                             background: MAT_PANEL_BG,
                             border: '1.5px solid #e5b54f',
                             color: MAT_TEXT,
-                            marginBottom: '8px',
+                            marginBottom: '7px',
                             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.45)',
                           }}
                         >
@@ -1672,7 +2287,7 @@ export const ScarletSeal = () => {
                                   Playing {selectedMeta.name} (
                                   {selectedMeta.value})
                                 </div>
-                                {selectedMeta.value === 8 ? (
+                                {selectedMeta.id === 'sovereign' ? (
                                   <MatButton
                                     variant="danger"
                                     confirmLabel="Really discard Sovereign?"
@@ -1686,7 +2301,7 @@ export const ScarletSeal = () => {
                                     disabled={!canCommitPlay}
                                     onClick={submitPlay}
                                   >
-                                    {selectedMeta.needsTarget &&
+                                    {selectedMeta.targetMode !== 'none' &&
                                     validTargets.length === 0
                                       ? `Discard ${selectedMeta.name} (No Effect)`
                                       : `Play ${selectedMeta.name}`}
@@ -1694,7 +2309,7 @@ export const ScarletSeal = () => {
                                 )}
                               </div>
 
-                              {selectedMeta.needsTarget &&
+                              {selectedMeta.targetMode !== 'none' &&
                                 (validTargets.length === 0 ? (
                                   <div
                                     style={{
@@ -1703,9 +2318,9 @@ export const ScarletSeal = () => {
                                       color: MAT_TEXT_SOFT,
                                     }}
                                   >
-                                    All other active courtiers are shielded by
-                                    the Attendant — this card will be discarded
-                                    without effect.
+                                    {data.flatterer_target
+                                      ? 'No legal targeting combination satisfies the Flatterer mark — this card will be discarded without effect.'
+                                      : 'Not enough unprotected courtiers to target — this card will be discarded without effect.'}
                                   </div>
                                 ) : (
                                   <div>
@@ -1719,7 +2334,16 @@ export const ScarletSeal = () => {
                                         marginBottom: '4px',
                                       }}
                                     >
-                                      Choose Target
+                                      {selectedMeta.targetMode ===
+                                      'swap_two_peek_one'
+                                        ? `Choose 2 Players to Swap (${selectedTargets.length}/2)`
+                                        : selectedMeta.targetMode ===
+                                            'one_or_two'
+                                          ? `Choose 1 or 2 Players to Inspect (${selectedTargets.length}/2)`
+                                          : 'Choose Target'}
+                                      {forcedFlatterer
+                                        ? ' · Flatterer Target Required'
+                                        : ''}
                                     </div>
                                     <div
                                       style={{
@@ -1740,29 +2364,42 @@ export const ScarletSeal = () => {
                                           const allowed = validTargets.includes(
                                             s.index,
                                           );
+                                          const picked =
+                                            selectedTargets.includes(s.index);
+                                          const locked =
+                                            s.index === forcedFlatterer &&
+                                            selectedMeta.targetMode !==
+                                              'single';
                                           return (
                                             <MatButton
                                               key={s.index}
                                               variant={
-                                                selectedTarget === s.index
-                                                  ? 'selected'
-                                                  : 'default'
+                                                picked ? 'selected' : 'default'
                                               }
                                               disabled={!allowed}
                                               title={
-                                                allowed
-                                                  ? undefined
-                                                  : 'Shielded by Attendant until their next turn.'
+                                                !allowed
+                                                  ? s.protected
+                                                    ? 'Shielded by Attendant until their next turn.'
+                                                    : 'Must choose the Flatterer’s marked target.'
+                                                  : locked
+                                                    ? 'Required by Flatterer.'
+                                                    : undefined
                                               }
                                               onClick={() =>
-                                                setSelectedTarget(s.index)
+                                                toggleTarget(s.index)
                                               }
                                             >
                                               {s.name}
                                               {s.index === mySeat.index
                                                 ? ' (Yourself)'
                                                 : ''}
-                                              {!allowed ? ' [Protected]' : ''}
+                                              {s.index === forcedFlatterer
+                                                ? ' ★'
+                                                : ''}
+                                              {!allowed && s.protected
+                                                ? ' [Protected]'
+                                                : ''}
                                             </MatButton>
                                           );
                                         })}
@@ -1770,7 +2407,60 @@ export const ScarletSeal = () => {
                                   </div>
                                 ))}
 
-                              {selectedMeta.needsGuess &&
+                              {/* Inquisitor: choose which swapped hand to inspect */}
+                              {selectedMeta.targetMode ===
+                                'swap_two_peek_one' &&
+                                selectedTargets.length === 2 && (
+                                  <div>
+                                    <div
+                                      style={{
+                                        fontSize: '11px',
+                                        color: MAT_LABEL_GOLD,
+                                        fontWeight: 'bold',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.6px',
+                                        marginBottom: '4px',
+                                      }}
+                                    >
+                                      Inspect One Swapped Hand
+                                    </div>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: '5px',
+                                      }}
+                                    >
+                                      {selectedTargets.map((idx) => {
+                                        const s = data.seats.find(
+                                          (seat) => seat.index === idx,
+                                        );
+                                        if (!s) {
+                                          return null;
+                                        }
+                                        return (
+                                          <MatButton
+                                            key={idx}
+                                            variant={
+                                              selectedPeek === idx
+                                                ? 'selected'
+                                                : 'default'
+                                            }
+                                            onClick={() => setSelectedPeek(idx)}
+                                          >
+                                            {s.name}
+                                            {s.index === mySeat.index
+                                              ? ' (Yourself)'
+                                              : ''}
+                                          </MatButton>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                              {/* Watchman / Prelate number guess */}
+                              {selectedMeta.guessMode &&
                                 validTargets.length > 0 && (
                                   <div>
                                     <div
@@ -1783,7 +2473,11 @@ export const ScarletSeal = () => {
                                         marginBottom: '4px',
                                       }}
                                     >
-                                      Name a Role (Not Watchman)
+                                      {selectedMeta.guessMode === 'prelate'
+                                        ? 'Name Any Number (0–9)'
+                                        : data.expanded
+                                          ? 'Name a Number (Other Than 1)'
+                                          : 'Name a Role (Not Watchman)'}
                                     </div>
                                     <div
                                       style={{
@@ -1792,17 +2486,17 @@ export const ScarletSeal = () => {
                                         gap: '5px',
                                       }}
                                     >
-                                      {WATCHMAN_GUESSES.map((g) => (
+                                      {guessNumbers.map((n) => (
                                         <MatButton
-                                          key={g}
+                                          key={n}
                                           variant={
-                                            selectedGuess === g
+                                            selectedGuess === n
                                               ? 'selected'
                                               : 'default'
                                           }
-                                          onClick={() => setSelectedGuess(g)}
+                                          onClick={() => setSelectedGuess(n)}
                                         >
-                                          {g} {CARDS[g].name}
+                                          {guessLabels[n] || String(n)}
                                         </MatButton>
                                       ))}
                                     </div>
@@ -1846,7 +2540,12 @@ export const ScarletSeal = () => {
           <SidePanel openReference={() => setShowRef(true)} />
         </div>
 
-        {showRef && <ReferenceModal onClose={() => setShowRef(false)} />}
+        {showRef && (
+          <ReferenceModal
+            defaultExpanded={!!data.expanded}
+            onClose={() => setShowRef(false)}
+          />
+        )}
       </Window.Content>
     </Window>
   );
@@ -1865,7 +2564,7 @@ const SidePanel = (props: { openReference: () => void }) => {
   let tone = INK_SOFT;
   if (data.phase === 'match_end') {
     tone = SEAL_RED;
-  } else if (data.my_turn) {
+  } else if (data.my_turn || data.is_my_prelate_choice) {
     tone = SEAL_GREEN;
   } else if (data.phase === 'round_end') {
     tone = SEAL_AMBER;
@@ -1883,7 +2582,7 @@ const SidePanel = (props: { openReference: () => void }) => {
   return (
     <div
       style={{
-        width: '286px',
+        width: '276px',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -1894,7 +2593,10 @@ const SidePanel = (props: { openReference: () => void }) => {
       <div style={panelCard}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={capsStyle}>Card Game · 2–4 Players</div>
+            <div style={capsStyle}>
+              Card Game ·{' '}
+              {data.expanded ? '32 Cards (5–8P)' : '16 Cards (2–4P)'}
+            </div>
             <div
               style={{ fontFamily: TITLE_FONT, color: TITLE, fontSize: '18px' }}
             >
@@ -2062,8 +2764,16 @@ const SidePanel = (props: { openReference: () => void }) => {
   );
 };
 
-const ReferenceModal = (props: { onClose: () => void }) => {
-  const { onClose } = props;
+const ReferenceModal = (props: {
+  defaultExpanded: boolean;
+  onClose: () => void;
+}) => {
+  const { defaultExpanded, onClose } = props;
+  const [tab, setTab] = useState<'classic' | 'expanded'>(
+    defaultExpanded ? 'expanded' : 'classic',
+  );
+  const order = tab === 'expanded' ? EXPANSION_ORDER : CLASSIC_ORDER;
+
   return (
     <div
       style={{
@@ -2081,7 +2791,7 @@ const ReferenceModal = (props: { onClose: () => void }) => {
       <div
         style={{
           ...panelCard,
-          width: '540px',
+          width: '580px',
           maxHeight: '90%',
           overflowY: 'auto',
           padding: '14px 18px',
@@ -2104,10 +2814,25 @@ const ReferenceModal = (props: { onClose: () => void }) => {
               fontSize: '20px',
             }}
           >
-            Court Reference Card (16 Cards)
+            Court Reference Card
           </div>
           <Button icon="times" onClick={onClose}>
             Close
+          </Button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+          <Button
+            selected={tab === 'classic'}
+            onClick={() => setTab('classic')}
+          >
+            Classic 16 Cards (2–4P)
+          </Button>
+          <Button
+            selected={tab === 'expanded'}
+            onClick={() => setTab('expanded')}
+          >
+            Expanded +16 Cards (5–8P)
           </Button>
         </div>
 
@@ -2119,19 +2844,34 @@ const ReferenceModal = (props: { onClose: () => void }) => {
             lineHeight: 1.4,
           }}
         >
-          Each round, 1 card is set aside face-down (plus 3 face-up in a
-          2-player game). On your turn, draw 1 card and discard 1 of your 2
-          cards, applying its effect. Win a round by being the last courtier
-          standing or holding the highest card when the deck empties (ties break
-          by highest sum of discarded cards). Seals of Favor to win:{' '}
-          <b>2P: 7</b> · <b>3P: 5</b> · <b>4P: 4</b>.
+          {tab === 'classic' ? (
+            <>
+              Used alone for 2–4 players (and combined with the expansion for
+              5–8 players). Seals of Favor to win: <b>2P: 7</b> · <b>3P: 5</b> ·{' '}
+              <b>4–8P: 4</b>. Showdown ties break by highest sum of discarded
+              cards.
+            </>
+          ) : (
+            <>
+              Added automatically for 5–8 players (32 cards total). Naming a
+              number (Watchman or Prelate) matches <b>all</b> roles with that
+              number. Multiple players tying at 4+ Seals play a tiebreaker
+              round.
+            </>
+          )}
         </div>
 
-        {REFERENCE_ORDER.map((val) => {
-          const meta = CARDS[val];
+        {order.map((id) => {
+          const meta = CARDS[id];
+          const copies =
+            tab === 'expanded'
+              ? id === 'watchman'
+                ? '+3 (8 total)'
+                : `×${meta.copiesExpanded}`
+              : `×${meta.copiesClassic}`;
           return (
             <div
-              key={val}
+              key={id}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -2169,7 +2909,7 @@ const ReferenceModal = (props: { onClose: () => void }) => {
                   flexShrink: 0,
                 }}
               >
-                <CardEmblem value={meta.value} color={meta.accent} size={26} />
+                <CardEmblem id={meta.id} color={meta.accent} size={26} />
               </span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 'bold', color: INK }}>
@@ -2181,7 +2921,7 @@ const ReferenceModal = (props: { onClose: () => void }) => {
                       color: INK_SOFT,
                     }}
                   >
-                    (×{meta.copies})
+                    ({copies})
                   </span>
                 </div>
                 <div style={{ fontSize: FONT_SMALL, color: INK_SOFT }}>

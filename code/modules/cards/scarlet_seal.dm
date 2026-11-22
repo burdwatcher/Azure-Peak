@@ -1,19 +1,28 @@
-#define SS_WATCHMAN 1
-#define SS_CONFESSOR 2
-#define SS_KNIGHT 3
-#define SS_ATTENDANT 4
-#define SS_STEWARD 5
-#define SS_HAND 6
-#define SS_CONSORT 7
-#define SS_SOVEREIGN 8
+#define SS_FOOL "fool"
+#define SS_CUTTHROAT "cutthroat"
+#define SS_WATCHMAN "watchman"
+#define SS_CONFESSOR "confessor"
+#define SS_INQUISITOR "inquisitor"
+#define SS_KNIGHT "knight"
+#define SS_SPYMASTER "spymaster"
+#define SS_ATTENDANT "attendant"
+#define SS_FLATTERER "flatterer"
+#define SS_STEWARD "steward"
+#define SS_SENESCHAL "seneschal"
+#define SS_HAND "hand"
+#define SS_WARDEN "warden"
+#define SS_CONSORT "consort"
+#define SS_MATRIARCH "matriarch"
+#define SS_SOVEREIGN "sovereign"
+#define SS_PRELATE "prelate"
 
 #define SS_PHASE_LOBBY "lobby"
 #define SS_PHASE_PLAYING "playing"
 #define SS_PHASE_ROUND_END "round_end"
 #define SS_PHASE_MATCH_END "match_end"
 
-#define SS_MAX_SEATS 4
-#define SS_MAX_HISTORY 80
+#define SS_MAX_SEATS 8
+#define SS_MAX_HISTORY 100
 #define SS_RESETTIME (20 SECONDS)
 #define SS_PACKTIME (10 SECONDS)
 
@@ -30,7 +39,7 @@
 
 /obj/item/scarlet_seal_box
 	name = "Scarlet Seal card case"
-	desc = "A velvet-lined walnut case holding a sixteen-card court deck and crimson wax Seals of Favor, for two to four players."
+	desc = "A velvet-lined walnut case holding the full thirty-two-card court deck and crimson wax Seals of Favor, for two to eight players."
 	icon = 'icons/roguetown/items/cards/scarlet_seal.dmi'
 	icon_state = "scarlet_seal_box"
 	w_class = WEIGHT_CLASS_SMALL
@@ -62,8 +71,7 @@
 	var/eliminated = FALSE
 	var/protected = FALSE
 	var/private_note
-	var/peek_card = 0
-	var/peek_target_name
+	var/list/peek_cards = list()
 	var/peek_label
 	var/peek_seq = 0
 
@@ -72,12 +80,11 @@
 	index = seat_index
 	color_key = seat_color
 
-/datum/scarlet_seal_seat/proc/set_intel(label, note, card_val, target_name)
+/datum/scarlet_seal_seat/proc/set_intel(label, note, list/cards_shown)
 	peek_seq++
 	peek_label = label
 	private_note = note
-	peek_card = card_val
-	peek_target_name = target_name
+	peek_cards = cards_shown ? cards_shown.Copy() : list()
 
 /datum/scarlet_seal_seat/proc/clear_round()
 	hand = list()
@@ -85,8 +92,7 @@
 	eliminated = FALSE
 	protected = FALSE
 	private_note = null
-	peek_card = 0
-	peek_target_name = null
+	peek_cards = list()
 	peek_label = null
 
 /datum/scarlet_seal_seat/proc/clear_seat()
@@ -95,33 +101,47 @@
 	seals = 0
 	clear_round()
 
-/datum/scarlet_seal_seat/proc/discard_sum()
+/datum/scarlet_seal_seat/proc/seneschal_count()
 	. = 0
-	for(var/card_val in discards)
-		. += card_val
+	for(var/card_id in discards)
+		if(card_id == SS_SENESCHAL)
+			.++
+
+/datum/scarlet_seal_seat/proc/has_warden()
+	return (SS_WARDEN in discards)
 
 /obj/structure/scarlet_seal
 	name = "Scarlet Seal table"
-	desc = "A crimson velvet card mat set for a game of Scarlet Seal, complete with courtier cards and wax Seals of Favor."
+	desc = "A crimson velvet card mat set for a game of Scarlet Seal, complete with courtier cards and wax Seals of Favor for two to eight players."
 	icon = 'icons/roguetown/items/cards/scarlet_seal.dmi'
 	icon_state = "scarlet_seal_table"
 	anchored = TRUE
 	density = FALSE
 	layer = OBJ_LAYER
-	/// Four seats around the card mat
+	/// Eight seats around the card mat
 	var/list/datum/scarlet_seal_seat/seats = list()
 	/// Current match phase (lobby, playing, round_end, match_end)
 	var/phase = SS_PHASE_LOBBY
+	/// Whether the current match uses the 32-card expanded deck (5-8 players)
+	var/expanded_deck = FALSE
 	/// Current round number in the match
 	var/round_num = 0
-	/// Seals of Favor required to win the match (7 for 2p, 5 for 3p, 4 for 4p)
+	/// Seals of Favor required to win the match (7 for 2p, 5 for 3p, 4 for 4-8p)
 	var/seals_to_win = 4
-	/// Index (1..4) of the seat whose turn it currently is
+	/// Index (1..8) of the seat whose turn it currently is
 	var/turn_seat = 0
+	/// Seat index forced to be chosen by the next targeting card (Flatterer effect), or 0
+	var/flatterer_target = 0
+	/// Seat index who played the Fool this round, or 0
+	var/fool_owner = 0
+	/// Seat index holding the Fool token this round, or 0
+	var/fool_target = 0
+	/// Seat index deciding whether to keep or redraw after being guessed by Prelate, or 0
+	var/pending_prelate_seat = 0
 	/// Remaining face-down draw deck (index 1 is top of deck)
 	var/list/deck = list()
-	/// Single card removed face-down at round start (drawn only if a Steward empties the deck)
-	var/set_aside_hidden = 0
+	/// Single card removed face-down at round start (drawn if Steward/Cutthroat/Prelate empties deck)
+	var/set_aside_hidden
 	/// Three cards removed face-up at round start in 2-player games
 	var/list/set_aside_open = list()
 	/// Seat indices that won the most recent round
@@ -145,7 +165,7 @@
 
 /obj/structure/scarlet_seal/Initialize(mapload)
 	. = ..()
-	var/list/colors = list("red", "blue", "green", "amber")
+	var/list/colors = list("red", "blue", "green", "amber", "plum", "teal", "copper", "slate")
 	for(var/i in 1 to SS_MAX_SEATS)
 		seats += new /datum/scarlet_seal_seat(i, colors[i])
 
@@ -158,7 +178,7 @@
 	. = ..()
 	. += span_info("Use the card mat with an empty hand to sit down or spectate.")
 	. += span_info("Right click the mat to rotate it.")
-	. += span_info("Supports 2 to 4 players in a sixteen-card game of court intrigue.")
+	. += span_info("Supports 2 to 8 players: 16-card court deck for 2–4 players, expanding to 32 cards for 5–8 players.")
 	. += span_info("Pack the cards back into their case once no match is in progress.")
 
 /obj/structure/scarlet_seal/attack_hand(mob/user)
@@ -207,27 +227,31 @@
 			"hand" = can_see_hand ? S.hand.Copy() : list(),
 			"hand_count" = length(S.hand),
 			"discards" = S.discards.Copy(),
-			"discard_sum" = S.discard_sum(),
+			"discard_sum" = seat_discard_sum(S),
+			"seneschals" = S.seneschal_count(),
+			"has_warden" = S.has_warden(),
 			"eliminated" = S.eliminated,
 			"protected" = S.protected,
-			"is_turn" = (phase == SS_PHASE_PLAYING && turn_seat == S.index),
+			"flatterer_marked" = (flatterer_target == S.index),
+			"fool_marked" = (fool_target == S.index),
+			"is_turn" = (phase == SS_PHASE_PLAYING && !pending_prelate_seat && turn_seat == S.index),
 			"round_winner" = (S.index in last_winners),
 			"match_winner" = (S.index in match_winners),
 		))
 
 	var/list/seated = seated_list()
 	var/seated_count = length(seated)
+	var/preview_expanded = (seated_count >= 5)
 	var/preview_target = target_seals_for(max(2, seated_count))
-	var/is_my_turn = (phase == SS_PHASE_PLAYING && my_seat && my_seat.index == turn_seat && !my_seat.eliminated)
+	var/is_my_turn = (phase == SS_PHASE_PLAYING && !pending_prelate_seat && my_seat && my_seat.index == turn_seat && !my_seat.eliminated)
 
 	var/list/targets_by_card = list()
 	var/forced_consort = FALSE
 	if(is_my_turn)
 		forced_consort = must_discard_consort(my_seat)
-		for(var/card_val in my_seat.hand)
-			var/key = "[card_val]"
-			if(!(key in targets_by_card))
-				targets_by_card[key] = valid_targets(my_seat, card_val)
+		for(var/card_id in my_seat.hand)
+			if(!(card_id in targets_by_card))
+				targets_by_card[card_id] = valid_targets(my_seat, card_id)
 
 	var/status = "Take a seat to begin."
 	switch(phase)
@@ -235,10 +259,14 @@
 			if(seated_count < 2)
 				status = "Waiting for courtiers ([seated_count]/2 minimum)."
 			else
-				status = "[seated_count] courtiers seated — ready to deal."
+				status = "[seated_count] courtiers seated ([preview_expanded ? "32-card expanded" : "16-card classic"] deck) — ready to deal."
 		if(SS_PHASE_PLAYING)
-			var/datum/scarlet_seal_seat/active_seat = (turn_seat >= 1 && turn_seat <= length(seats)) ? seats[turn_seat] : null
-			status = active_seat ? "[active_seat.name]'s turn (Round [round_num])." : "Round [round_num] in progress."
+			if(pending_prelate_seat >= 1 && pending_prelate_seat <= length(seats))
+				var/datum/scarlet_seal_seat/PS = seats[pending_prelate_seat]
+				status = "Waiting for [PS.name] to keep or redraw their exposed card."
+			else
+				var/datum/scarlet_seal_seat/active_seat = (turn_seat >= 1 && turn_seat <= length(seats)) ? seats[turn_seat] : null
+				status = active_seat ? "[active_seat.name]'s turn (Round [round_num])." : "Round [round_num] in progress."
 		if(SS_PHASE_ROUND_END)
 			status = round_summary || "Round [round_num] complete."
 		if(SS_PHASE_MATCH_END)
@@ -250,12 +278,15 @@
 			"seq" = my_seat.peek_seq,
 			"label" = my_seat.peek_label,
 			"note" = my_seat.private_note,
-			"card" = my_seat.peek_card,
-			"target" = my_seat.peek_target_name,
+			"cards" = my_seat.peek_cards.Copy(),
 		)
+
+	var/fool_owner_name = (fool_owner >= 1 && fool_owner <= length(seats)) ? seats[fool_owner].name : null
+	var/pending_prelate_name = (pending_prelate_seat >= 1 && pending_prelate_seat <= length(seats)) ? seats[pending_prelate_seat].name : null
 
 	return list(
 		"phase" = phase,
+		"expanded" = (phase == SS_PHASE_LOBBY) ? preview_expanded : expanded_deck,
 		"round" = round_num,
 		"seals_to_win" = (phase == SS_PHASE_LOBBY) ? preview_target : seals_to_win,
 		"seated_count" = seated_count,
@@ -263,6 +294,11 @@
 		"my_seat" = my_seat?.index || 0,
 		"my_turn" = is_my_turn,
 		"forced_consort" = forced_consort,
+		"flatterer_target" = flatterer_target,
+		"fool_owner_name" = fool_owner_name,
+		"pending_prelate_seat" = pending_prelate_seat,
+		"pending_prelate_name" = pending_prelate_name,
+		"is_my_prelate_choice" = (phase == SS_PHASE_PLAYING && pending_prelate_seat && my_seat && my_seat.index == pending_prelate_seat),
 		"targets_by_card" = targets_by_card,
 		"deck_count" = length(deck),
 		"has_hidden_card" = !!set_aside_hidden,
@@ -330,20 +366,28 @@
 				return FALSE
 			var/departing_name = S.name
 			var/was_turn = (phase == SS_PHASE_PLAYING && turn_seat == S.index)
+			var/was_prelate = (phase == SS_PHASE_PLAYING && pending_prelate_seat == S.index)
 			var/was_live = (phase == SS_PHASE_PLAYING || phase == SS_PHASE_ROUND_END)
 			if(phase == SS_PHASE_PLAYING && !S.eliminated && length(S.hand))
 				var/list/dropped_names = list()
-				for(var/card_val in S.hand)
-					S.discards += card_val
-					dropped_names += "[card_name(card_val)] ([card_val])"
+				for(var/card_id in S.hand)
+					S.discards += card_id
+					dropped_names += card_label(card_id)
 				add_history("[departing_name] leaves the table, discarding [english_list(dropped_names)].")
 			else if(was_live)
 				add_history("[departing_name] leaves the table.")
+			if(flatterer_target == S.index)
+				flatterer_target = 0
+			if(fool_owner == S.index || fool_target == S.index)
+				fool_owner = 0
+				fool_target = 0
+			if(was_prelate)
+				pending_prelate_seat = 0
 			message = is_self ? "[departing_name] rises from the table." : "[who] clears [departing_name] from Seat [idx]."
 			S.clear_seat()
 			drop_reset()
 			if(was_live)
-				handle_midmatch_departure(was_turn)
+				handle_midmatch_departure(was_turn || was_prelate)
 			playsound(src, SS_SOUND_NOTIFY, 50, FALSE)
 			update_icon()
 			return TRUE
@@ -369,8 +413,16 @@
 		if("play")
 			var/slot = text2num(params["slot"])
 			var/target_idx = text2num(params["target"])
-			var/guess = text2num(params["guess"])
-			return play_card(user, slot, target_idx, guess)
+			var/target2_idx = text2num(params["target2"])
+			var/peek_idx = text2num(params["peek"])
+			var/raw_guess = params["guess"]
+			var/guess = isnum(raw_guess) ? raw_guess : (istext(raw_guess) ? text2num(raw_guess) : -1)
+			if(isnull(guess))
+				guess = -1
+			return play_card(user, slot, target_idx, target2_idx, peek_idx, guess)
+
+		if("prelate_choice")
+			return handle_prelate_choice(user, params["choice"])
 
 		if("reset")
 			if(!my_seat)
@@ -433,25 +485,115 @@
 
 	return FALSE
 
-/obj/structure/scarlet_seal/proc/card_name(card_val)
-	switch(card_val)
+/obj/structure/scarlet_seal/proc/card_value(card_id)
+	switch(card_id)
+		if(SS_FOOL, SS_CUTTHROAT)
+			return 0
+		if(SS_WATCHMAN)
+			return 1
+		if(SS_CONFESSOR, SS_INQUISITOR)
+			return 2
+		if(SS_KNIGHT, SS_SPYMASTER)
+			return 3
+		if(SS_ATTENDANT, SS_FLATTERER)
+			return 4
+		if(SS_STEWARD, SS_SENESCHAL)
+			return 5
+		if(SS_HAND, SS_WARDEN)
+			return 6
+		if(SS_CONSORT, SS_MATRIARCH)
+			return 7
+		if(SS_SOVEREIGN)
+			return 8
+		if(SS_PRELATE)
+			return 9
+	return 0
+
+/obj/structure/scarlet_seal/proc/card_name(card_id)
+	switch(card_id)
+		if(SS_FOOL)
+			return "Fool"
+		if(SS_CUTTHROAT)
+			return "Cutthroat"
 		if(SS_WATCHMAN)
 			return "Watchman"
 		if(SS_CONFESSOR)
 			return "Confessor"
+		if(SS_INQUISITOR)
+			return "Inquisitor"
 		if(SS_KNIGHT)
 			return "Knight"
+		if(SS_SPYMASTER)
+			return "Spymaster"
 		if(SS_ATTENDANT)
 			return "Attendant"
+		if(SS_FLATTERER)
+			return "Flatterer"
 		if(SS_STEWARD)
 			return "Steward"
+		if(SS_SENESCHAL)
+			return "Seneschal"
 		if(SS_HAND)
 			return "Hand"
+		if(SS_WARDEN)
+			return "Warden"
 		if(SS_CONSORT)
 			return "Consort"
+		if(SS_MATRIARCH)
+			return "Matriarch"
 		if(SS_SOVEREIGN)
 			return "Sovereign"
+		if(SS_PRELATE)
+			return "Prelate"
 	return "Unknown"
+
+/obj/structure/scarlet_seal/proc/card_label(card_id)
+	return "[card_name(card_id)] ([card_value(card_id)])"
+
+/obj/structure/scarlet_seal/proc/number_label(num_val)
+	if(!expanded_deck)
+		switch(num_val)
+			if(2)
+				return "2 (Confessor)"
+			if(3)
+				return "3 (Knight)"
+			if(4)
+				return "4 (Attendant)"
+			if(5)
+				return "5 (Steward)"
+			if(6)
+				return "6 (Hand)"
+			if(7)
+				return "7 (Consort)"
+			if(8)
+				return "8 (Sovereign)"
+	switch(num_val)
+		if(0)
+			return "0 (Fool / Cutthroat)"
+		if(1)
+			return "1 (Watchman)"
+		if(2)
+			return "2 (Confessor / Inquisitor)"
+		if(3)
+			return "3 (Knight / Spymaster)"
+		if(4)
+			return "4 (Attendant / Flatterer)"
+		if(5)
+			return "5 (Steward / Seneschal)"
+		if(6)
+			return "6 (Hand / Warden)"
+		if(7)
+			return "7 (Consort / Matriarch)"
+		if(8)
+			return "8 (Sovereign)"
+		if(9)
+			return "9 (Prelate)"
+	return "[num_val]"
+
+/obj/structure/scarlet_seal/proc/seat_discard_sum(datum/scarlet_seal_seat/S)
+	. = 0
+	for(var/card_id in S.discards)
+		. += card_value(card_id)
 
 /obj/structure/scarlet_seal/proc/target_seals_for(player_count)
 	switch(player_count)
@@ -462,8 +604,8 @@
 		else
 			return 4
 
-/obj/structure/scarlet_seal/proc/build_deck()
-	return shuffle(list(
+/obj/structure/scarlet_seal/proc/build_deck(use_expanded)
+	var/list/cards = list(
 		SS_WATCHMAN, SS_WATCHMAN, SS_WATCHMAN, SS_WATCHMAN, SS_WATCHMAN,
 		SS_CONFESSOR, SS_CONFESSOR,
 		SS_KNIGHT, SS_KNIGHT,
@@ -472,7 +614,21 @@
 		SS_HAND,
 		SS_CONSORT,
 		SS_SOVEREIGN,
-	))
+	)
+	if(use_expanded)
+		cards += list(
+			SS_FOOL,
+			SS_CUTTHROAT,
+			SS_WATCHMAN, SS_WATCHMAN, SS_WATCHMAN,
+			SS_INQUISITOR, SS_INQUISITOR,
+			SS_SPYMASTER, SS_SPYMASTER,
+			SS_FLATTERER, SS_FLATTERER,
+			SS_SENESCHAL, SS_SENESCHAL,
+			SS_WARDEN,
+			SS_MATRIARCH,
+			SS_PRELATE,
+		)
+	return shuffle(cards)
 
 /obj/structure/scarlet_seal/proc/seated_list()
 	. = list()
@@ -537,10 +693,15 @@
 			S.seals = 0
 			S.clear_round()
 	phase = SS_PHASE_LOBBY
+	expanded_deck = FALSE
 	round_num = 0
 	turn_seat = 0
+	flatterer_target = 0
+	fool_owner = 0
+	fool_target = 0
+	pending_prelate_seat = 0
 	deck = list()
-	set_aside_hidden = 0
+	set_aside_hidden = null
 	set_aside_open = list()
 	last_winners = list()
 	match_winners = list()
@@ -554,41 +715,77 @@
 
 /obj/structure/scarlet_seal/proc/draw_card()
 	if(!length(deck))
-		return 0
-	var/card_val = deck[1]
+		return null
+	var/card_id = deck[1]
 	deck.Cut(1, 2)
-	return card_val
+	return card_id
 
-/obj/structure/scarlet_seal/proc/draw_card_for_steward()
+/obj/structure/scarlet_seal/proc/draw_card_or_hidden()
 	if(length(deck))
 		return draw_card()
 	if(set_aside_hidden)
-		var/card_val = set_aside_hidden
-		set_aside_hidden = 0
+		var/card_id = set_aside_hidden
+		set_aside_hidden = null
 		add_history("The deck is empty — the face-down set-aside card is drawn.")
-		return card_val
-	return 0
+		return card_id
+	return null
 
 /obj/structure/scarlet_seal/proc/must_discard_consort(datum/scarlet_seal_seat/S)
 	return (SS_CONSORT in S.hand) && ((SS_HAND in S.hand) || (SS_STEWARD in S.hand))
 
-/obj/structure/scarlet_seal/proc/valid_targets(datum/scarlet_seal_seat/actor, card_val)
+/obj/structure/scarlet_seal/proc/card_needs_target(card_id)
+	return (card_id in list(
+		SS_FOOL, SS_WATCHMAN, SS_CONFESSOR, SS_INQUISITOR,
+		SS_KNIGHT, SS_SPYMASTER, SS_FLATTERER, SS_STEWARD,
+		SS_HAND, SS_MATRIARCH, SS_PRELATE,
+	))
+
+/obj/structure/scarlet_seal/proc/card_can_target_self(card_id)
+	return (card_id in list(SS_INQUISITOR, SS_FLATTERER, SS_STEWARD))
+
+/obj/structure/scarlet_seal/proc/valid_targets(datum/scarlet_seal_seat/actor, card_id)
 	. = list()
-	switch(card_val)
-		if(SS_WATCHMAN, SS_CONFESSOR, SS_KNIGHT, SS_HAND)
-			for(var/datum/scarlet_seal_seat/T as anything in seats)
-				if(T.ckey && !T.eliminated && T != actor && !T.protected)
-					. += T.index
-		if(SS_STEWARD)
-			for(var/datum/scarlet_seal_seat/T as anything in seats)
-				if(T.ckey && !T.eliminated && (T == actor || !T.protected))
-					. += T.index
+	if(!card_needs_target(card_id))
+		return
+	var/can_self = card_can_target_self(card_id)
+	var/list/base = list()
+	for(var/datum/scarlet_seal_seat/T as anything in seats)
+		if(!T.ckey || T.eliminated)
+			continue
+		if(T == actor)
+			if(can_self)
+				base += T.index
+		else if(!T.protected)
+			base += T.index
+
+	// Enforce Flatterer forced target if active
+	if(flatterer_target >= 1 && flatterer_target <= length(seats))
+		var/datum/scarlet_seal_seat/F = seats[flatterer_target]
+		if(F.ckey && !F.eliminated)
+			if(!(flatterer_target in base))
+				// Forced player cannot legally be chosen -> card has no effect
+				return list()
+			if(card_id == SS_INQUISITOR)
+				// Needs 2 players including flatterer_target
+				if(length(base) < 2)
+					return list()
+				return base
+			if(card_id == SS_SPYMASTER)
+				// Needs 1 or 2 players including flatterer_target
+				return base
+			// Single-target cards must choose flatterer_target exclusively
+			return list(flatterer_target)
+
+	if(card_id == SS_INQUISITOR && length(base) < 2)
+		return list()
+	return base
 
 /obj/structure/scarlet_seal/proc/start_match()
 	var/list/datum/scarlet_seal_seat/seated = seated_list()
 	if(length(seated) < 2)
 		return
 	drop_reset()
+	expanded_deck = (length(seated) >= 5)
 	seals_to_win = target_seals_for(length(seated))
 	for(var/datum/scarlet_seal_seat/S as anything in seats)
 		S.seals = 0
@@ -597,7 +794,7 @@
 	last_winners = list()
 	match_winners = list()
 	history = list()
-	add_history("A new match begins! First to [seals_to_win] Seals of Favor wins.")
+	add_history("A new match begins with the [expanded_deck ? "32-card expanded" : "16-card classic"] deck! First to [seals_to_win] Seals of Favor wins.")
 	start_round()
 
 /obj/structure/scarlet_seal/proc/start_round()
@@ -609,14 +806,18 @@
 	round_num++
 	showdown = FALSE
 	round_summary = null
+	flatterer_target = 0
+	fool_owner = 0
+	fool_target = 0
+	pending_prelate_seat = 0
 	set_aside_open = list()
-	set_aside_hidden = 0
+	set_aside_hidden = null
 	for(var/datum/scarlet_seal_seat/S as anything in seats)
 		S.clear_round()
 
-	deck = build_deck()
+	deck = build_deck(expanded_deck)
 	set_aside_hidden = draw_card()
-	if(length(seated) == 2)
+	if(length(seated) == 2 && !expanded_deck)
 		for(var/i in 1 to 3)
 			set_aside_open += draw_card()
 	for(var/datum/scarlet_seal_seat/S as anything in seated)
@@ -641,8 +842,8 @@
 	add_history("— Round [round_num] begins. [starter.name] goes first. —")
 	if(length(set_aside_open))
 		var/list/open_labels = list()
-		for(var/card_val in set_aside_open)
-			open_labels += "[card_name(card_val)] ([card_val])"
+		for(var/card_id in set_aside_open)
+			open_labels += card_label(card_id)
 		add_history("Set aside face-up: [english_list(open_labels)].")
 	playsound(src, SS_SOUND_SHUFFLE, 65, FALSE)
 	begin_turn(starter)
@@ -656,22 +857,29 @@
 	message = "It is [S.name]'s turn."
 
 /obj/structure/scarlet_seal/proc/eliminate_seat(datum/scarlet_seal_seat/victim)
+	var/had_warden = victim.has_warden()
 	victim.eliminated = TRUE
 	victim.protected = FALSE
+	if(flatterer_target == victim.index)
+		flatterer_target = 0
 	var/list/dropped = list()
 	while(length(victim.hand))
-		var/card_val = victim.hand[1]
+		var/card_id = victim.hand[1]
 		victim.hand.Cut(1, 2)
-		victim.discards += card_val
-		dropped += "[card_name(card_val)] ([card_val])"
+		victim.discards += card_id
+		dropped += card_label(card_id)
 	if(length(dropped))
 		add_history("[victim.name] is knocked out and discards [english_list(dropped)].")
 	else
 		add_history("[victim.name] is knocked out of the round.")
 	playsound(src, SS_SOUND_ELIMINATE, 60, FALSE)
+	if(had_warden)
+		victim.seals++
+		add_history("[victim.name] reveals Warden (6) in their discards and claims a Seal of Favor!")
+		playsound(src, SS_SOUND_SEAL, 65, FALSE)
 
-/obj/structure/scarlet_seal/proc/play_card(mob/user, slot, target_idx, guess)
-	if(phase != SS_PHASE_PLAYING)
+/obj/structure/scarlet_seal/proc/play_card(mob/user, slot, target_idx, target2_idx, peek_idx, guess)
+	if(phase != SS_PHASE_PLAYING || pending_prelate_seat)
 		return FALSE
 	var/datum/scarlet_seal_seat/actor = seat_for(user)
 	if(!actor || actor.index != turn_seat || actor.eliminated)
@@ -679,30 +887,69 @@
 		return FALSE
 	if(!slot || slot < 1 || slot > length(actor.hand))
 		return FALSE
-	var/card_val = actor.hand[slot]
-	if(must_discard_consort(actor) && card_val != SS_CONSORT)
+	var/card_id = actor.hand[slot]
+	if(must_discard_consort(actor) && card_id != SS_CONSORT)
 		to_chat(user, span_warning("You must discard the Consort when holding the Hand or Steward."))
 		return FALSE
 
-	var/list/targets = valid_targets(actor, card_val)
+	var/list/targets = valid_targets(actor, card_id)
 	var/datum/scarlet_seal_seat/target = null
-	if(card_val in list(SS_WATCHMAN, SS_CONFESSOR, SS_KNIGHT, SS_STEWARD, SS_HAND))
-		if(length(targets))
-			if(!(target_idx in targets))
-				to_chat(user, span_warning("Choose a valid target for [card_name(card_val)]."))
+	var/datum/scarlet_seal_seat/target2 = null
+	var/datum/scarlet_seal_seat/peek_seat = null
+	var/active_flatterer = flatterer_target
+
+	if(card_needs_target(card_id) && length(targets))
+		if(card_id == SS_INQUISITOR)
+			if(!(target_idx in targets) || !(target2_idx in targets) || target_idx == target2_idx)
+				to_chat(user, span_warning("Choose two distinct valid players to swap hands."))
+				return FALSE
+			if(active_flatterer && active_flatterer != target_idx && active_flatterer != target2_idx)
+				to_chat(user, span_warning("You must include the Flatterer's chosen target."))
+				return FALSE
+			if(peek_idx != target_idx && peek_idx != target2_idx)
+				to_chat(user, span_warning("Choose which of the two swapped hands to inspect."))
 				return FALSE
 			target = seats[target_idx]
-		if(card_val == SS_WATCHMAN && target)
-			if(!guess || guess < SS_CONFESSOR || guess > SS_SOVEREIGN)
-				to_chat(user, span_warning("Name a role other than Watchman (2–8)."))
+			target2 = seats[target2_idx]
+			peek_seat = seats[peek_idx]
+		else if(card_id == SS_SPYMASTER)
+			if(!(target_idx in targets))
+				to_chat(user, span_warning("Choose at least one valid target for Spymaster."))
+				return FALSE
+			if(target2_idx && (!(target2_idx in targets) || target2_idx == target_idx))
+				to_chat(user, span_warning("Choose a second distinct valid target, or only one target."))
+				return FALSE
+			if(active_flatterer && active_flatterer != target_idx && active_flatterer != target2_idx)
+				to_chat(user, span_warning("You must include the Flatterer's chosen target."))
+				return FALSE
+			target = seats[target_idx]
+			if(target2_idx)
+				target2 = seats[target2_idx]
+		else
+			if(!(target_idx in targets))
+				to_chat(user, span_warning("Choose a valid target for [card_name(card_id)]."))
+				return FALSE
+			target = seats[target_idx]
+
+		if(card_id == SS_WATCHMAN && target)
+			var/min_guess = expanded_deck ? 0 : 2
+			var/max_guess = expanded_deck ? 9 : 8
+			if(guess < min_guess || guess > max_guess || guess == 1)
+				to_chat(user, span_warning("Name a number other than 1."))
+				return FALSE
+		if(card_id == SS_PRELATE && target)
+			if(guess < 0 || guess > 9)
+				to_chat(user, span_warning("Name a number from 0 to 9."))
 				return FALSE
 
 	// Discard the chosen card face-up in front of the player
 	actor.hand.Cut(slot, slot + 1)
-	actor.discards += card_val
+	actor.discards += card_id
+	// Flatterer applies only to the next card played; clear before resolving this card
+	flatterer_target = 0
 	playsound(src, SS_SOUND_PLAY, 55, FALSE)
 
-	switch(card_val)
+	switch(card_id)
 		if(SS_SOVEREIGN)
 			add_history("[actor.name] discards Sovereign (8) — their missive is cast into the hearth!")
 			eliminate_seat(actor)
@@ -710,50 +957,117 @@
 		if(SS_CONSORT)
 			add_history("[actor.name] discards Consort (7).")
 
+		if(SS_CUTTHROAT)
+			add_history("[actor.name] discards Cutthroat (0).")
+
+		if(SS_SENESCHAL)
+			add_history("[actor.name] discards Seneschal (5) (+1 to showdown hand value).")
+
+		if(SS_WARDEN)
+			add_history("[actor.name] discards Warden (6) (claims a Seal of Favor if knocked out).")
+
 		if(SS_ATTENDANT)
 			actor.protected = TRUE
 			add_history("[actor.name] plays Attendant (4) and is shielded from other cards until their next turn.")
 
+		if(SS_FLATTERER)
+			flatterer_target = target.index
+			var/target_desc = (target == actor) ? "themself" : target.name
+			add_history("[actor.name] plays Flatterer (4), marking [target_desc] — the next targeting card must choose [target.name]!")
+
+		if(SS_FOOL)
+			if(!target)
+				add_history("[actor.name] discards Fool (0) without effect (no valid target).")
+			else
+				fool_owner = actor.index
+				fool_target = target.index
+				add_history("[actor.name] plays Fool (0) and places the Fool token on [target.name]!")
+
 		if(SS_WATCHMAN)
 			if(!target)
-				add_history("[actor.name] discards Watchman (1) without effect (all other courtiers are protected).")
-			else if(length(target.hand) && target.hand[1] == guess)
-				add_history("[actor.name] plays Watchman (1) on [target.name], naming [card_name(guess)] ([guess]) — correct!")
+				add_history("[actor.name] discards Watchman (1) without effect (no valid target).")
+			else if(length(target.hand) && target.hand[1] == SS_CUTTHROAT)
+				add_history("[actor.name] plays Watchman (1) on [target.name], naming [number_label(guess)] — [target.name] reveals Cutthroat (0)! [actor.name] is ambushed!")
+				target.hand.Cut(1, 2)
+				target.discards += SS_CUTTHROAT
+				var/drawn = draw_card_or_hidden()
+				if(drawn)
+					target.hand += drawn
+				add_history("[target.name] discards Cutthroat (0) and draws a new card.")
+				eliminate_seat(actor)
+			else if(length(target.hand) && card_value(target.hand[1]) == guess)
+				add_history("[actor.name] plays Watchman (1) on [target.name], naming [number_label(guess)] — correct!")
 				eliminate_seat(target)
 			else
-				add_history("[actor.name] plays Watchman (1) on [target.name], naming [card_name(guess)] ([guess]) — no match.")
+				add_history("[actor.name] plays Watchman (1) on [target.name], naming [number_label(guess)] — no match.")
 
 		if(SS_CONFESSOR)
 			if(!target)
-				add_history("[actor.name] discards Confessor (2) without effect (all other courtiers are protected).")
+				add_history("[actor.name] discards Confessor (2) without effect (no valid target).")
 			else
-				var/seen = length(target.hand) ? target.hand[1] : 0
-				actor.set_intel("Confessor's Inquiry", "You secretly viewed [target.name]'s hand: [card_name(seen)] ([seen]).", seen, target.name)
+				var/seen = length(target.hand) ? target.hand[1] : null
+				actor.set_intel("Confessor's Inquiry", "You secretly viewed [target.name]'s hand: [card_label(seen)].", seen ? list(seen) : list())
 				add_history("[actor.name] plays Confessor (2) and secretly inspects [target.name]'s hand.")
+
+		if(SS_INQUISITOR)
+			if(!target || !target2)
+				add_history("[actor.name] discards Inquisitor (2) without effect (fewer than two valid targets).")
+			else
+				var/card1 = length(target.hand) ? target.hand[1] : null
+				var/card2 = length(target2.hand) ? target2.hand[1] : null
+				target.hand = card2 ? list(card2) : list()
+				target2.hand = card1 ? list(card1) : list()
+				if(target != actor)
+					target.set_intel("Inquisitor's Decree", "[actor.name] swapped your [card_label(card1)] with [target2.name]'s [card_label(card2)].", card2 ? list(card2) : list())
+				if(target2 != actor)
+					target2.set_intel("Inquisitor's Decree", "[actor.name] swapped your [card_label(card2)] with [target.name]'s [card_label(card1)].", card1 ? list(card1) : list())
+				var/peeked_card = length(peek_seat.hand) ? peek_seat.hand[1] : null
+				actor.set_intel("Inquisitor's Inspection", "You swapped [target.name] and [target2.name]'s hands and inspected [peek_seat.name]'s new hand: [card_label(peeked_card)].", peeked_card ? list(peeked_card) : list())
+				add_history("[actor.name] plays Inquisitor (2), swapping [target.name] and [target2.name]'s hands and secretly inspecting one.")
 
 		if(SS_KNIGHT)
 			if(!target)
-				add_history("[actor.name] discards Knight (3) without effect (all other courtiers are protected).")
+				add_history("[actor.name] discards Knight (3) without effect (no valid target).")
 			else
-				var/my_card = length(actor.hand) ? actor.hand[1] : 0
-				var/their_card = length(target.hand) ? target.hand[1] : 0
-				if(my_card > their_card)
-					actor.set_intel("Knight's Challenge", "Your [card_name(my_card)] ([my_card]) beat [target.name]'s [card_name(their_card)] ([their_card]).", their_card, target.name)
-					target.set_intel("Knight's Challenge", "[actor.name]'s [card_name(my_card)] ([my_card]) beat your [card_name(their_card)] ([their_card]).", my_card, actor.name)
+				var/my_card = length(actor.hand) ? actor.hand[1] : null
+				var/their_card = length(target.hand) ? target.hand[1] : null
+				var/my_val = card_value(my_card)
+				var/their_val = card_value(their_card)
+				if(my_val > their_val)
+					actor.set_intel("Knight's Challenge", "Your [card_label(my_card)] beat [target.name]'s [card_label(their_card)].", their_card ? list(their_card) : list())
+					target.set_intel("Knight's Challenge", "[actor.name]'s [card_label(my_card)] beat your [card_label(their_card)].", my_card ? list(my_card) : list())
 					add_history("[actor.name] plays Knight (3) against [target.name] — [target.name] holds the lower card!")
 					eliminate_seat(target)
-				else if(their_card > my_card)
-					actor.set_intel("Knight's Challenge", "[target.name]'s [card_name(their_card)] ([their_card]) beat your [card_name(my_card)] ([my_card]).", their_card, target.name)
-					target.set_intel("Knight's Challenge", "Your [card_name(their_card)] ([their_card]) beat [actor.name]'s [card_name(my_card)] ([my_card]).", my_card, actor.name)
+				else if(their_val > my_val)
+					actor.set_intel("Knight's Challenge", "[target.name]'s [card_label(their_card)] beat your [card_label(my_card)].", their_card ? list(their_card) : list())
+					target.set_intel("Knight's Challenge", "Your [card_label(their_card)] beat [actor.name]'s [card_label(my_card)].", my_card ? list(my_card) : list())
 					add_history("[actor.name] plays Knight (3) against [target.name] — [actor.name] holds the lower card!")
 					eliminate_seat(actor)
 				else
-					actor.set_intel("Knight's Challenge", "You and [target.name] both hold [card_name(my_card)] ([my_card]) — a tie!", their_card, target.name)
-					target.set_intel("Knight's Challenge", "You and [actor.name] both hold [card_name(my_card)] ([my_card]) — a tie!", my_card, actor.name)
+					actor.set_intel("Knight's Challenge", "You ([card_label(my_card)]) and [target.name] ([card_label(their_card)]) tied!", their_card ? list(their_card) : list())
+					target.set_intel("Knight's Challenge", "You ([card_label(their_card)]) and [actor.name] ([card_label(my_card)]) tied!", my_card ? list(my_card) : list())
 					add_history("[actor.name] plays Knight (3) against [target.name] — tied hands! Nothing happens.")
 
+		if(SS_SPYMASTER)
+			if(!target)
+				add_history("[actor.name] discards Spymaster (3) without effect (no valid target).")
+			else if(target2)
+				var/c1 = length(target.hand) ? target.hand[1] : null
+				var/c2 = length(target2.hand) ? target2.hand[1] : null
+				var/list/shown = list()
+				if(c1)
+					shown += c1
+				if(c2)
+					shown += c2
+				actor.set_intel("Spymaster's Report", "You secretly viewed [target.name]'s [card_label(c1)] and [target2.name]'s [card_label(c2)].", shown)
+				add_history("[actor.name] plays Spymaster (3) and secretly inspects [target.name] and [target2.name]'s hands.")
+			else
+				var/c1 = length(target.hand) ? target.hand[1] : null
+				actor.set_intel("Spymaster's Report", "You secretly viewed [target.name]'s [card_label(c1)].", c1 ? list(c1) : list())
+				add_history("[actor.name] plays Spymaster (3) and secretly inspects [target.name]'s hand.")
+
 		if(SS_STEWARD)
-			var/discarded = length(target.hand) ? target.hand[1] : 0
+			var/discarded = length(target.hand) ? target.hand[1] : null
 			target.hand = list()
 			if(discarded)
 				target.discards += discarded
@@ -762,24 +1076,94 @@
 				add_history("[actor.name] plays Steward (5) on [target_desc], forcing [target.name] to discard Sovereign (8)!")
 				eliminate_seat(target)
 			else
-				var/drawn = draw_card_for_steward()
+				var/drawn = draw_card_or_hidden()
 				if(drawn)
 					target.hand += drawn
-				add_history("[actor.name] plays Steward (5) on [target_desc]. [target.name] discards [card_name(discarded)] ([discarded]) and draws a new card.")
+				add_history("[actor.name] plays Steward (5) on [target_desc]. [target.name] discards [card_label(discarded)] and draws a new card.")
 				playsound(src, SS_SOUND_DISCARD, 55, FALSE)
 
 		if(SS_HAND)
 			if(!target)
-				add_history("[actor.name] discards Hand (6) without effect (all other courtiers are protected).")
+				add_history("[actor.name] discards Hand (6) without effect (no valid target).")
 			else
-				var/my_card = length(actor.hand) ? actor.hand[1] : 0
-				var/their_card = length(target.hand) ? target.hand[1] : 0
+				var/my_card = length(actor.hand) ? actor.hand[1] : null
+				var/their_card = length(target.hand) ? target.hand[1] : null
 				actor.hand = their_card ? list(their_card) : list()
 				target.hand = my_card ? list(my_card) : list()
-				actor.set_intel("Hand's Decree", "You traded your [card_name(my_card)] ([my_card]) to [target.name] and received [card_name(their_card)] ([their_card]).", my_card, target.name)
-				target.set_intel("Hand's Decree", "[actor.name] traded their [card_name(my_card)] ([my_card]) for your [card_name(their_card)] ([their_card]).", their_card, actor.name)
+				actor.set_intel("Hand's Decree", "You traded your [card_label(my_card)] to [target.name] and received [card_label(their_card)].", my_card ? list(my_card) : list())
+				target.set_intel("Hand's Decree", "[actor.name] traded their [card_label(my_card)] for your [card_label(their_card)].", their_card ? list(their_card) : list())
 				add_history("[actor.name] plays Hand (6) and trades hands with [target.name].")
 
+		if(SS_MATRIARCH)
+			if(!target)
+				add_history("[actor.name] discards Matriarch (7) without effect (no valid target).")
+			else
+				var/my_card = length(actor.hand) ? actor.hand[1] : null
+				var/their_card = length(target.hand) ? target.hand[1] : null
+				var/my_val = card_value(my_card)
+				var/their_val = card_value(their_card)
+				if(my_val < their_val)
+					actor.set_intel("Matriarch's Judgment", "Your lower [card_label(my_card)] outlasted [target.name]'s [card_label(their_card)].", their_card ? list(their_card) : list())
+					target.set_intel("Matriarch's Judgment", "Your higher [card_label(their_card)] was knocked out against [actor.name]'s [card_label(my_card)].", my_card ? list(my_card) : list())
+					add_history("[actor.name] plays Matriarch (7) against [target.name] — [target.name] holds the higher card!")
+					eliminate_seat(target)
+				else if(their_val < my_val)
+					actor.set_intel("Matriarch's Judgment", "Your higher [card_label(my_card)] was knocked out against [target.name]'s [card_label(their_card)].", their_card ? list(their_card) : list())
+					target.set_intel("Matriarch's Judgment", "Your lower [card_label(their_card)] outlasted [actor.name]'s [card_label(my_card)].", my_card ? list(my_card) : list())
+					add_history("[actor.name] plays Matriarch (7) against [target.name] — [actor.name] holds the higher card!")
+					eliminate_seat(actor)
+				else
+					actor.set_intel("Matriarch's Judgment", "You ([card_label(my_card)]) and [target.name] ([card_label(their_card)]) tied!", their_card ? list(their_card) : list())
+					target.set_intel("Matriarch's Judgment", "You ([card_label(their_card)]) and [actor.name] ([card_label(my_card)]) tied!", my_card ? list(my_card) : list())
+					add_history("[actor.name] plays Matriarch (7) against [target.name] — tied hands! Nothing happens.")
+
+		if(SS_PRELATE)
+			if(!target)
+				add_history("[actor.name] discards Prelate (9) without effect (no valid target).")
+			else if(length(target.hand) && card_value(target.hand[1]) == guess)
+				actor.seals++
+				add_history("[actor.name] plays Prelate (9) on [target.name], naming [number_label(guess)] — correct! [actor.name] claims a Seal of Favor!")
+				playsound(src, SS_SOUND_SEAL, 65, FALSE)
+				if(actor.seals >= seals_to_win)
+					finish_match_winner(actor)
+					return TRUE
+				// Target may choose to keep or discard & draw a new card
+				pending_prelate_seat = target.index
+				message = "[target.name] may keep or redraw their exposed card."
+				return TRUE
+			else
+				add_history("[actor.name] plays Prelate (9) on [target.name], naming [number_label(guess)] — no match.")
+
+	advance_or_end_round()
+	return TRUE
+
+/obj/structure/scarlet_seal/proc/handle_prelate_choice(mob/user, choice)
+	if(phase != SS_PHASE_PLAYING || !pending_prelate_seat)
+		return FALSE
+	var/datum/scarlet_seal_seat/S = seat_for(user)
+	if(!S || S.index != pending_prelate_seat)
+		to_chat(user, span_warning("It is not your decision to make."))
+		return FALSE
+	if(choice != "keep" && choice != "redraw")
+		return FALSE
+	pending_prelate_seat = 0
+	if(choice == "keep")
+		add_history("[S.name] keeps their exposed card.")
+		playsound(src, SS_SOUND_NOTIFY, 50, FALSE)
+	else
+		var/discarded = length(S.hand) ? S.hand[1] : null
+		S.hand = list()
+		if(discarded)
+			S.discards += discarded
+		if(discarded == SS_SOVEREIGN)
+			add_history("[S.name] chooses to discard Sovereign (8) — their missive is cast into the hearth!")
+			eliminate_seat(S)
+		else
+			var/drawn = draw_card_or_hidden()
+			if(drawn)
+				S.hand += drawn
+			add_history("[S.name] discards [card_label(discarded)] and draws a new card.")
+			playsound(src, SS_SOUND_DISCARD, 55, FALSE)
 	advance_or_end_round()
 	return TRUE
 
@@ -790,27 +1174,44 @@
 		return
 
 	if(!length(deck))
-		var/best_hand = -1
+		var/has_sovereign = FALSE
+		for(var/datum/scarlet_seal_seat/S as anything in alive)
+			if(length(S.hand) && S.hand[1] == SS_SOVEREIGN)
+				has_sovereign = TRUE
+				break
+
+		var/best_val = -1
 		var/list/datum/scarlet_seal_seat/tied = list()
 		for(var/datum/scarlet_seal_seat/S as anything in alive)
-			var/val = length(S.hand) ? S.hand[1] : 0
-			if(val > best_hand)
-				best_hand = val
+			var/card_id = length(S.hand) ? S.hand[1] : null
+			// Sovereign always beats Prelate at end-of-round showdown
+			if(has_sovereign && card_id == SS_PRELATE)
+				continue
+			var/eff_val = card_value(card_id) + S.seneschal_count()
+			if(eff_val > best_val)
+				best_val = eff_val
 				tied = list(S)
-			else if(val == best_hand)
+			else if(eff_val == best_val)
 				tied += S
+
 		var/list/datum/scarlet_seal_seat/winners = tied
 		if(length(tied) > 1)
 			var/best_discard = -1
 			winners = list()
 			for(var/datum/scarlet_seal_seat/S as anything in tied)
-				var/dsum = S.discard_sum()
+				var/dsum = seat_discard_sum(S)
 				if(dsum > best_discard)
 					best_discard = dsum
 					winners = list(S)
 				else if(dsum == best_discard)
 					winners += S
 		finish_round(winners, TRUE)
+		return
+
+	// Mid-round immediate victory check (e.g. Warden triggered on elimination while round continues)
+	var/list/datum/scarlet_seal_seat/mid_leaders = top_match_leaders()
+	if(length(mid_leaders) == 1)
+		finish_match_winner(mid_leaders[1])
 		return
 
 	for(var/offset in 1 to SS_MAX_SEATS)
@@ -821,9 +1222,34 @@
 			begin_turn(candidate)
 			return
 
+/obj/structure/scarlet_seal/proc/top_match_leaders()
+	var/top_seals = 0
+	var/list/datum/scarlet_seal_seat/leaders = list()
+	for(var/datum/scarlet_seal_seat/S as anything in seated_list())
+		if(S.seals >= seals_to_win)
+			if(S.seals > top_seals)
+				top_seals = S.seals
+				leaders = list(S)
+			else if(S.seals == top_seals)
+				leaders += S
+	return leaders
+
+/obj/structure/scarlet_seal/proc/finish_match_winner(datum/scarlet_seal_seat/champ)
+	phase = SS_PHASE_MATCH_END
+	turn_seat = 0
+	pending_prelate_seat = 0
+	flatterer_target = 0
+	match_winners = list(champ.index)
+	message = "[champ.name] wins the match with [champ.seals] Seals of Favor!"
+	add_history(message)
+	play_match_end_sounds(champ.ckey)
+	update_icon()
+
 /obj/structure/scarlet_seal/proc/finish_round(list/datum/scarlet_seal_seat/winners, is_showdown)
 	showdown = is_showdown
 	turn_seat = 0
+	pending_prelate_seat = 0
+	flatterer_target = 0
 	last_winners = list()
 	var/list/win_names = list()
 	for(var/datum/scarlet_seal_seat/W as anything in winners)
@@ -834,8 +1260,10 @@
 	if(is_showdown)
 		var/list/reveal_parts = list()
 		for(var/datum/scarlet_seal_seat/S as anything in active_list())
-			var/val = length(S.hand) ? S.hand[1] : 0
-			reveal_parts += "[S.name]: [card_name(val)] ([val], discards [S.discard_sum()])"
+			var/card_id = length(S.hand) ? S.hand[1] : null
+			var/bonus = S.seneschal_count()
+			var/bonus_str = bonus ? " +[bonus] Seneschal" : ""
+			reveal_parts += "[S.name]: [card_label(card_id)][bonus_str] (discards [seat_discard_sum(S)])"
 		add_history("Deck exhausted — Showdown! [english_list(reveal_parts)].")
 		if(length(win_names) == 1)
 			round_summary = "[win_names[1]] wins Round [round_num] at showdown and claims a Seal of Favor!"
@@ -848,38 +1276,31 @@
 
 	add_history(round_summary)
 
-	// Check if a courtier has won the match
-	var/top_seals = 0
-	var/list/datum/scarlet_seal_seat/leaders = list()
-	for(var/datum/scarlet_seal_seat/S as anything in seated_list())
-		if(S.seals >= seals_to_win)
-			if(S.seals > top_seals)
-				top_seals = S.seals
-				leaders = list(S)
-			else if(S.seals == top_seals)
-				leaders += S
+	// Resolve Fool bet if the marked player won the round
+	if(fool_owner >= 1 && fool_owner <= length(seats) && fool_target && (fool_target in last_winners))
+		var/datum/scarlet_seal_seat/FO = seats[fool_owner]
+		var/datum/scarlet_seal_seat/FT = seats[fool_target]
+		if(FO.ckey)
+			FO.seals++
+			add_history("[FO.name]'s Fool bet on [FT.name] pays off — [FO.name] claims a Seal of Favor!")
 
+	var/list/datum/scarlet_seal_seat/leaders = top_match_leaders()
 	if(length(leaders) == 1)
-		var/datum/scarlet_seal_seat/champ = leaders[1]
-		phase = SS_PHASE_MATCH_END
-		match_winners = list(champ.index)
-		message = "[champ.name] wins the match with [champ.seals] Seals of Favor!"
-		add_history(message)
-		play_match_end_sounds(champ.ckey)
+		finish_match_winner(leaders[1])
 	else if(length(leaders) > 1)
 		phase = SS_PHASE_ROUND_END
 		var/list/tied_names = list()
 		for(var/datum/scarlet_seal_seat/L as anything in leaders)
 			tied_names += L.name
-		message = "[english_list(tied_names)] are tied at [top_seals] Seals of Favor — deal a tiebreaker round!"
+		message = "[english_list(tied_names)] are tied at [leaders[1].seals] Seals of Favor — deal a tiebreaker round!"
 		add_history(message)
 		playsound(src, SS_SOUND_SEAL, 65, FALSE)
+		update_icon()
 	else
 		phase = SS_PHASE_ROUND_END
 		message = round_summary
 		playsound(src, SS_SOUND_SEAL, 65, FALSE)
-
-	update_icon()
+		update_icon()
 
 /obj/structure/scarlet_seal/proc/handle_midmatch_departure(was_turn)
 	var/list/datum/scarlet_seal_seat/seated = seated_list()
@@ -888,6 +1309,8 @@
 			var/datum/scarlet_seal_seat/survivor = seated[1]
 			phase = SS_PHASE_MATCH_END
 			turn_seat = 0
+			pending_prelate_seat = 0
+			flatterer_target = 0
 			match_winners = list(survivor.index)
 			message = "[survivor.name] wins by forfeit."
 			add_history(message)
@@ -895,6 +1318,8 @@
 		else
 			phase = SS_PHASE_LOBBY
 			turn_seat = 0
+			pending_prelate_seat = 0
+			flatterer_target = 0
 			message = "All courtiers have left the table."
 		return
 
@@ -920,14 +1345,23 @@
 				break
 		C.mob.playsound_local(get_turf(C.mob), is_seated_loser ? SS_SOUND_LOSS : SS_SOUND_WIN, 65)
 
+#undef SS_FOOL
+#undef SS_CUTTHROAT
 #undef SS_WATCHMAN
 #undef SS_CONFESSOR
+#undef SS_INQUISITOR
 #undef SS_KNIGHT
+#undef SS_SPYMASTER
 #undef SS_ATTENDANT
+#undef SS_FLATTERER
 #undef SS_STEWARD
+#undef SS_SENESCHAL
 #undef SS_HAND
+#undef SS_WARDEN
 #undef SS_CONSORT
+#undef SS_MATRIARCH
 #undef SS_SOVEREIGN
+#undef SS_PRELATE
 #undef SS_PHASE_LOBBY
 #undef SS_PHASE_PLAYING
 #undef SS_PHASE_ROUND_END
