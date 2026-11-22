@@ -1769,6 +1769,7 @@
 #include "code\modules\cards\cards.dm"
 #include "code\modules\cards\card_types\playing_cards.dm"
 #include "code\modules\cards\card_types\tarot.dm"
+#include "code\modules\cards\scarlet_seal.dm"
 #include "code\modules\cargo\exports.dm"
 #include "code\modules\cargo\supplypod.dm"
 #include "code\modules\cargo\packsrogue\_pack.dm"
