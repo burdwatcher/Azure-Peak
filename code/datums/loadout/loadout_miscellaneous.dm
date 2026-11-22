@@ -20,6 +20,11 @@
 	path = /obj/item/chessboard_folded
 	sort_category = "Misc"
 
+/datum/loadout_item/scarlet_seal
+	name = "Scarlet Seal Card Case"
+	path = /obj/item/scarlet_seal_box
+	sort_category = "Misc"
+
 /datum/loadout_item/tarot_deck
 	name = "Tarot Deck (Major Arcana Only)"
 	path = /obj/item/deck/tarot
