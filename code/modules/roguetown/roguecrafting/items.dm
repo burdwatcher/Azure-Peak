@@ -210,6 +210,13 @@
 	structurecraft = /obj/machinery/tanningrack
 	craftdiff = 1
 
+/datum/crafting_recipe/roguetown/survival/bill_of_fare
+	name = "bill of fare"
+	display_category = ITEM_CAT_BOOK_WRIT
+	result = /obj/item/bill_of_fare
+	reqs = list(/obj/item/paper = 1)
+	craftdiff = 0
+
 /datum/crafting_recipe/roguetown/survival/zigbox
 	name = "zigbox"
 	result = /obj/item/storage/belt/rogue/pouch/zigarrete
@@ -261,6 +268,19 @@
 /datum/crafting_recipe/roguetown/survival/tarot_deck_minorarcana
 	name = "tarot deck (major and minor arcana)"
 	result = list(/obj/item/deck/tarot/includes_minor_arcana)
+	reqs = list(
+		/obj/item/paper/scroll = 3,
+		/obj/item/grown/log/tree/small = 1,
+		/obj/item/natural/ash = 1,
+		)
+	skillcraft = /datum/skill/misc/reading
+	tools = list(/obj/item/natural/feather)
+	req_table = TRUE
+	craftdiff = 2
+
+/datum/crafting_recipe/roguetown/survival/scarlet_seal
+	name = "Scarlet Seal card case"
+	result = /obj/item/scarlet_seal_box
 	reqs = list(
 		/obj/item/paper/scroll = 3,
 		/obj/item/grown/log/tree/small = 1,
